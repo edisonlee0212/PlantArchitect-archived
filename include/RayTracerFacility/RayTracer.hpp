@@ -1,5 +1,4 @@
 #pragma once
-#include <BTFBase.cuh>
 #include <CUDABuffer.hpp>
 #include <Optix7.hpp>
 #include <Vertex.hpp>
@@ -141,9 +140,6 @@ struct RAY_TRACER_FACILITY_API RayTracerInstance {
 
   bool m_verticesUpdateFlag = true;
   bool m_transformUpdateFlag = true;
-
-  bool m_enableMLVQ = false;
-  int m_mlvqMaterialIndex = 0;
 };
 
 enum PipelineType {
@@ -188,7 +184,6 @@ public:
                             CudaBuffer &lightProbes);
   RayTracer();
 
-  void LoadBtfMaterials(const std::string& folderPath);
   /*! build an acceleration structure for the given triangle mesh */
   void BuildAccelerationStructure();
   /*! constructs the shader binding table */
@@ -246,9 +241,6 @@ protected:
                     char launchParamsName[]) const;
   void AssemblePipeline(RayTracerPipeline &targetPipeline) const;
 #pragma endregion
-
-  std::vector<BtfBase> m_btfs;
-  std::vector<CudaBuffer> m_btfsBuffer;
 
 #pragma region Accleration structure
   /*! check if we have build the acceleration structure. */

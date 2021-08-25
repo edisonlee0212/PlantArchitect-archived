@@ -1,10 +1,17 @@
 #include <RayTracer.hpp>
+
 #include <optix_function_table_definition.h>
+
 #include <glm/glm.hpp>
+
 #include <glm/gtc/matrix_transform.hpp>
+
 #include <glm/gtc/quaternion.hpp>
+
 #include <glm/gtc/random.hpp>
+
 #include <glm/gtc/type_ptr.hpp>
+
 
 #define GL_TEXTURE_CUBE_MAP 0x8513
 
@@ -38,8 +45,8 @@ void DefaultRenderingProperties::OnGui() {
                 if (ImGui::BeginMenu("Settings")) {
                     ImGui::Checkbox("Accumulate", &m_accumulate);
                     ImGui::DragInt("bounce limit", &m_bounceLimit, 1, 1, 8);
-                    if(ImGui::DragInt("pixel samples", &m_samplesPerPixel, 1, 1, 64)){
-                      m_samplesPerPixel = glm::clamp(m_samplesPerPixel, 1, 128);
+                    if (ImGui::DragInt("pixel samples", &m_samplesPerPixel, 1, 1, 64)) {
+                        m_samplesPerPixel = glm::clamp(m_samplesPerPixel, 1, 128);
                     }
                     ImGui::Checkbox("Use environmental map", &m_useEnvironmentalMap);
                     ImGui::DragFloat("Skylight intensity", &m_skylightIntensity, 0.01f, 0.0f, 5.0f);
@@ -770,10 +777,6 @@ void RayTracer::BuildShaderBindingTable(std::vector<std::pair<unsigned, cudaText
                 rec.m_data.m_material.m_albedoTexture = 0;
                 rec.m_data.m_material.m_normalTexture = 0;
                 rec.m_data.m_material.m_diffuseIntensity = m_instances[i].m_diffuseIntensity;
-                rec.m_data.m_enableMLVQ = m_instances[i].m_enableMLVQ;
-                if (m_instances[i].m_enableMLVQ) {
-                    rec.m_data.m_rayMlvqMaterial.m_btf = m_btfs[m_instances[i].m_mlvqMaterialIndex];
-                }
                 if (m_instances[i].m_albedoTexture != 0) {
                     bool duplicate = false;
                     for (auto &boundTexture : boundTextures) {
@@ -916,22 +919,4 @@ void RayTracer::BuildShaderBindingTable(std::vector<std::pair<unsigned, cudaText
         m_defaultIlluminationEstimationPipeline.m_sbt.hitgroupRecordStrideInBytes = sizeof(DefaultIlluminationEstimationRayHitRecord);
         m_defaultIlluminationEstimationPipeline.m_sbt.hitgroupRecordCount = static_cast<int>(hitGroupRecords.size());
     }
-}
-void RayTracer::LoadBtfMaterials(const std::string& folderPath) {
-  int btfAmount = 3;
-  m_btfs.resize(btfAmount);
-  m_btfsBuffer.resize(btfAmount);
-  m_btfs[0].Init(folderPath + "btfs/fabric01");
-  m_btfs[1].Init(folderPath + "btfs/alu");
-  m_btfs[2].Init(folderPath + "btfs/corduroy");
-  /*
-  m_btfs[3].Init(UniEngine::FileIO::GetProjectPath() + "btfs/wool");
-  m_btfs[4].Init(UniEngine::FileIO::GetProjectPath() + "btfs/wallpaper");
-  m_btfs[5].Init(UniEngine::FileIO::GetProjectPath() + "btfs/impalla");
-  m_btfs[6].Init(UniEngine::FileIO::GetProjectPath() + "btfs/pulli");
-  m_btfs[7].Init(UniEngine::FileIO::GetProjectPath() + "btfs/proposte");
-   */
-  for (int i = 0; i < btfAmount; i++) {
-    m_btfsBuffer[i].Upload(&m_btfs[i], 1);
-  }
 }

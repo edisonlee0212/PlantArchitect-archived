@@ -6,7 +6,6 @@
 #include <RayTracedRenderer.hpp>
 #include <RayTracerManager.hpp>
 #include <RigidBody.hpp>
-#include <SorghumSystem.hpp>
 #include <TreeSystem.hpp>
 #include <Utilities.hpp>
 #include <Volume.hpp>
@@ -868,7 +867,6 @@ void PlantSystem::Start() {
         ground.GetOrSetPrivateComponent<RayTracerFacility::RayTracedRenderer>()
             .lock();
     rayTracedRenderer->SyncWithMeshRenderer();
-    rayTracedRenderer->m_enableMLVQ = true;
 
     auto cubeVolume = ground.GetOrSetPrivateComponent<CubeVolume>().lock();
     cubeVolume->m_asObstacle = true;

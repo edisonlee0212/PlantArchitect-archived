@@ -1,8 +1,9 @@
 #pragma once
 #include <Volume.hpp>
+#include <plant_architect_export.h>
 using namespace UniEngine;
 namespace PlantArchitect {
-class CubeVolume : public Volume {
+class PLANT_ARCHITECT_API CubeVolume : public Volume {
 public:
   void ApplyMeshRendererBounds();
   void OnCreate() override;

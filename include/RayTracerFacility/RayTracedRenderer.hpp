@@ -19,8 +19,6 @@ public:
   AssetRef m_mesh;
   AssetRef m_albedoTexture;
   AssetRef m_normalTexture;
-  bool m_enableMLVQ = false;
-  int m_mlvqMaterialIndex = 0;
   void OnGui() override;
   void SyncWithMeshRenderer();
 
