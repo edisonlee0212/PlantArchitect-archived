@@ -7,19 +7,50 @@
 #include <Utilities.hpp>
 #include <ProjectManager.hpp>
 #include <PhysicsManager.hpp>
+#include <PlantSystem.hpp>
 #include <PostProcessing.hpp>
 #include <RayTracerManager.hpp>
-#include <PlantNodeSystem.hpp>
+#include <SorghumSystem.hpp>
+#include <TreeSystem.hpp>
+#include <TreeLeaves.hpp>
+#include <CubeVolume.hpp>
+#include <RadialBoundingVolume.hpp>
+#include <TriangleIlluminationEstimator.hpp>
 #include <ClassRegistry.hpp>
-#include <RayTracedRenderer.hpp>
+#include <ObjectRotator.hpp>
 using namespace PlantArchitect;
 using namespace RayTracerFacility;
+
 void EngineSetup(bool enableRayTracing);
 
 int main() {
+    ClassRegistry::RegisterDataComponent<LeafInfo>("LeafInfo");
+    ClassRegistry::RegisterDataComponent<TreeLeavesTag>("TreeLeavesTag");
+    ClassRegistry::RegisterDataComponent<RbvTag>("RbvTag");
+    ClassRegistry::RegisterDataComponent<PlantInfo>("PlantInfo");
+    ClassRegistry::RegisterDataComponent<BranchCylinder>("BranchCylinder");
+    ClassRegistry::RegisterDataComponent<BranchCylinderWidth>("BranchCylinderWidth");
+    ClassRegistry::RegisterDataComponent<BranchPointer>("BranchPointer");
+    ClassRegistry::RegisterDataComponent<Illumination>("Illumination");
+    ClassRegistry::RegisterDataComponent<BranchColor>("BranchColor");
+    ClassRegistry::RegisterDataComponent<InternodeInfo>("InternodeInfo");
+    ClassRegistry::RegisterDataComponent<InternodeGrowth>("InternodeGrowth");
+    ClassRegistry::RegisterDataComponent<InternodeStatistics>("InternodeStatistics");
 
-    ClassRegistry::RegisterSystem<PlantNodeSystem>("PlantNodeSystem");
+    ClassRegistry::RegisterPrivateComponent<ObjectRotator>("ObjectRotator");
+    ClassRegistry::RegisterPrivateComponent<Spline>("Spline");
+    ClassRegistry::RegisterPrivateComponent<SorghumData>("SorghumData");
+    ClassRegistry::RegisterPrivateComponent<TriangleIlluminationEstimator>("TriangleIlluminationEstimator");
+    ClassRegistry::RegisterPrivateComponent<TreeData>("TreeData");
+    ClassRegistry::RegisterPrivateComponent<TreeLeaves>("TreeLeaves");
+    ClassRegistry::RegisterPrivateComponent<RadialBoundingVolume>("RadialBoundingVolume");
+    ClassRegistry::RegisterPrivateComponent<CubeVolume>("CubeVolume");
 
+    ClassRegistry::RegisterPrivateComponent<InternodeData>("InternodeData");
+
+    ClassRegistry::RegisterSystem<PlantSystem>("PlantSystem");
+    ClassRegistry::RegisterSystem<SorghumSystem>("SorghumSystem");
+    ClassRegistry::RegisterSystem<TreeSystem>("TreeSystem");
 
     ClassRegistry::RegisterPrivateComponent<RayTracedRenderer>(
             "RayTracedRenderer");
@@ -82,7 +113,7 @@ void EngineSetup(bool enableRayTracing) {
         */
         if (enableRayTracing)
             RayTracerManager::Init();
-        /*
+
         auto plantSystem =
                 EntityManager::GetOrCreateSystem<PlantSystem>(
                         EntityManager::GetCurrentScene(), SystemGroup::SimulationSystemGroup);
@@ -91,6 +122,5 @@ void EngineSetup(bool enableRayTracing) {
         auto sorghumSystem =
                 EntityManager::GetOrCreateSystem<SorghumSystem>(
                         EntityManager::GetCurrentScene(), SystemGroup::SimulationSystemGroup + 0.1f);
-                        */
     });
 }
