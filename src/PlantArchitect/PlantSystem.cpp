@@ -479,7 +479,7 @@ void PlantSystem::OnInspect() {
     ImGui::Text(
         "%s",
         ("Internode amount: " + std::to_string(m_internodes.size())).c_str());
-    if (ImGui::CollapsingHeader("Growth", ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (ImGui::TreeNodeEx("Growth", ImGuiTreeNodeFlags_DefaultOpen)) {
       static int pushAmount = 5;
       ImGui::DragInt("Amount", &pushAmount, 1, 0, 120.0f / m_deltaTime);
       if (ImGui::Button("Push and start (grow by iteration)")) {
@@ -492,7 +492,7 @@ void PlantSystem::OnInspect() {
         GrowAllPlants(pushAmount);
         const std::string spendTime =
             std::to_string(Application::Time().CurrentTime() - time);
-        Debug::Log("Growth finished in " + spendTime + " sec.");
+        UNIENGINE_LOG("Growth finished in " + spendTime + " sec.");
       }
 
       ImGui::SliderFloat("Time speed", &m_deltaTime, 0.1f, 1.0f);
@@ -509,8 +509,9 @@ void PlantSystem::OnInspect() {
         ImGui::Text("Metadata: %.3fs", m_metaDataTimer);
         ImGui::TreePop();
       }
+      ImGui::TreePop();
     }
-    if (ImGui::CollapsingHeader("Physics", ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (ImGui::TreeNodeEx("Physics", ImGuiTreeNodeFlags_DefaultOpen)) {
       static float pushPhysicsTime = 20.0f;
       ImGui::DragFloat("Time step", &m_physicsTimeStep, 0.001f, 0.01f, 0.1f);
       ImGui::DragFloat("Time", &pushPhysicsTime, 1.0f, 0.0f, 3600.0f);
@@ -532,6 +533,7 @@ void PlantSystem::OnInspect() {
             },
             false);
       }
+      ImGui::TreePop();
     }
   } else {
     ImGui::Text("Busy...");

@@ -10,7 +10,7 @@ Voxel &VoxelSpace::GetVoxel(const glm::vec3 &position) {
   const int z = glm::floor(relativePosition.z / m_diameter);
   if (x < 0 || y < 0 || z < 0 || x > m_size.x - 1 || y > m_size.y - 1 ||
       z > m_size.z - 1) {
-    Debug::Error("VoxelSpace: Out of bound!");
+      UNIENGINE_ERROR("VoxelSpace: Out of bound!");
     throw 1;
   }
   return m_layers[x].m_lines[y].m_voxels[z];

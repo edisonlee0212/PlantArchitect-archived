@@ -48,7 +48,7 @@ void TreeParameters::Serialize(std::filesystem::path path) const {
     std::ofstream ofs;
     ofs.open(path.c_str(), std::ofstream::out | std::ofstream::trunc);
     if (!ofs.is_open()) {
-        Debug::Error("Can't open file!");
+        UNIENGINE_ERROR("Can't open file!");
         return;
     }
     rapidxml::xml_document<> doc;
@@ -288,7 +288,7 @@ void TreeParameters::Deserialize(std::filesystem::path path) {
         m_treeType = std::atoi(param->first_node("TreeType")->first_attribute()->value());
     }
     catch (std::ifstream::failure e) {
-        Debug::Error("Failed to open file");
+        UNIENGINE_ERROR("Failed to open file");
     }
 }
 void TreeParameters::Serialize(YAML::Emitter &out) {

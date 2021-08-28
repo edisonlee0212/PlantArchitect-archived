@@ -830,7 +830,7 @@ void TreeSystem::OnInspect() {
     ImGui::DragFloat("Crown shyness D", &m_crownShynessDiameter, 0.01f, 0.0f,
                      2.0f);
     if (m_crownShynessDiameter > m_voxelSpaceModule.GetDiameter())
-        Debug::Error("Diameter too large!");
+    UNIENGINE_ERROR("Diameter too large!");
 
     ImGui::Separator();
     ImGui::Text("Metadata");
@@ -1384,7 +1384,7 @@ void TreeSystem::TreeSkinnedMeshGenerator(std::vector<Entity> &internodes,
 
 void TreeSystem::GenerateMeshForTree() {
     if (m_meshResolution <= 0.0f) {
-        Debug::Error("TreeSystem: Resolution must be larger than 0!");
+        UNIENGINE_ERROR("TreeSystem: Resolution must be larger than 0!");
         return;
     }
     int plantSize = m_plantSystem.Get<PlantSystem>()->m_plants.size();
@@ -1651,7 +1651,7 @@ void TreeSystem::GenerateMeshForTree() {
 
 void TreeSystem::GenerateSkinnedMeshForTree() {
     if (m_meshResolution <= 0.0f) {
-        Debug::Error("TreeSystem: Resolution must be larger than 0!");
+        UNIENGINE_ERROR("TreeSystem: Resolution must be larger than 0!");
         return;
     }
     int plantSize = m_plantSystem.Get<PlantSystem>()->m_plants.size();
@@ -2920,7 +2920,7 @@ void TreeSystem::SerializeScene(const std::string &filename) {
     std::ofstream ofs;
     ofs.open(filename.c_str(), std::ofstream::out | std::ofstream::trunc);
     if (!ofs.is_open()) {
-        Debug::Error("Can't open file!");
+        UNIENGINE_ERROR("Can't open file!");
         return;
     }
     rapidxml::xml_document<> doc;
@@ -3170,7 +3170,7 @@ void TreeSystem::InternodePostProcessor(const Entity &newInternode,
     rigidBody->SetAngularDamping(m_angularDamping);
     rigidBody->SetSolverIterations(m_positionSolverIteration,
                                    m_velocitySolverIteration);
-    rigidBody->SetEnableGravity(false);
+    //rigidBody->SetEnableGravity(false);
     // The rigidbody can only apply mesh bound after it's attached to an
     // entity with mesh renderer.
     auto joint = newInternode.GetOrSetPrivateComponent<Joint>().lock();
