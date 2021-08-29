@@ -363,7 +363,7 @@ void TreeSystem::UpdateBranchColors() {
                         auto internodeData =
                                 entity.GetOrSetPrivateComponent<InternodeData>().lock();
                         float totalResource = 0;
-                        for (const auto &bud : internodeData->m_buds)
+                        for (const auto &bud: internodeData->m_buds)
                             totalResource += bud.m_currentResource.m_nutrient;
                         float value = totalResource;
                         if (m_enableBranchDataCompress)
@@ -829,8 +829,7 @@ void TreeSystem::OnInspect() {
     ImGui::Text("Crown shyness");
     ImGui::DragFloat("Crown shyness D", &m_crownShynessDiameter, 0.01f, 0.0f,
                      2.0f);
-    if (m_crownShynessDiameter > m_voxelSpaceModule.GetDiameter())
-    UNIENGINE_ERROR("Diameter too large!");
+    if (m_crownShynessDiameter > m_voxelSpaceModule.GetDiameter()) UNIENGINE_ERROR("Diameter too large!");
 
     ImGui::Separator();
     ImGui::Text("Metadata");
@@ -1038,7 +1037,7 @@ void TreeSystem::RenderBranchCylinders(const float &displayTime) {
                         return internodeGrowth.m_distanceToRoot == 0;
                     });
 
-    for (const auto &i : rootInternodes) {
+    for (const auto &i: rootInternodes) {
         auto gt = i.GetDataComponent<GlobalTransform>();
         float thickness = 0.1f;
         if (i.GetChildrenAmount() > 0)
@@ -1898,7 +1897,7 @@ void TreeSystem::FormCandidates(std::vector<InternodeCandidate> &candidates) {
                     consumer.m_globalTime = globalTime;
                     currentBudResourceParcel += consumer;
                     bud.m_resourceLog.push_back(consumer);
-                    for (auto &newBud : candidate.m_buds) {
+                    for (auto &newBud: candidate.m_buds) {
                         newBud.m_resourceWeight /= totalResourceWeight;
                         auto resourceParcel = ResourceParcel(
                                 currentBudResourceParcel.m_nutrient * newBud.m_resourceWeight,
@@ -2050,7 +2049,7 @@ void TreeSystem::PruneTrees(
                 // auto thickestChild = internodeData->m_thickestChild.Get();
                 int targetIndex = 0;
                 const auto position = globalTransform.GetPosition();
-                for (auto &obstacle : obstacles) {
+                for (auto &obstacle: obstacles) {
                     if (obstacle.second->InVolume(obstacle.first, position)) {
                         std::lock_guard lock(mutex);
                         cutOff.push_back(internode);
@@ -2126,7 +2125,7 @@ void TreeSystem::PruneTrees(
                 }
             },
             false);
-    for (const auto &i : cutOff)
+    for (const auto &i: cutOff)
         EntityManager::DeleteEntity(i);
 }
 
@@ -2271,7 +2270,7 @@ void TreeSystem::UpdateDistances(const Entity &internode,
 #pragma region Update self status
             auto childInternodeData =
                     child.GetOrSetPrivateComponent<InternodeData>().lock();
-            for (const auto &bud : childInternodeData->m_buds)
+            for (const auto &bud: childInternodeData->m_buds)
                 if (bud.m_active && bud.m_isApical)
                     currentInternodeGrowth.m_inhibitor +=
                             treeData->m_parameters.m_inhibitorBase;
@@ -2377,7 +2376,7 @@ void TreeSystem::UpdateDistances(const Entity &internode,
         currentInternodeGrowth.m_MassOfChildren = 0.0f;
 #pragma endregion
 #pragma region Update self status
-        for (const auto &bud : childInternodeData->m_buds)
+        for (const auto &bud: childInternodeData->m_buds)
             if (bud.m_active && bud.m_isApical)
                 currentInternodeGrowth.m_inhibitor +=
                         treeData->m_parameters.m_inhibitorBase;
@@ -2613,7 +2612,7 @@ void TreeSystem::ResetTimeForTree(const float &value) {
     m_plantSystem.Get<PlantSystem>()->m_globalTime = value;
     std::vector<Entity> trees;
     m_plantSystem.Get<PlantSystem>()->m_plantQuery.ToEntityArray(trees);
-    for (const auto &tree : trees) {
+    for (const auto &tree: trees) {
         auto plantInfo = tree.GetDataComponent<PlantInfo>();
         if (plantInfo.m_startTime > value) {
             EntityManager::DeleteEntity(tree);
@@ -2632,7 +2631,7 @@ void TreeSystem::ResetTimeForTree(const float &value) {
             [value](int i, Entity internode, InternodeInfo &internodeInfo) {
                 auto childInternodeData =
                         internode.GetOrSetPrivateComponent<InternodeData>().lock();
-                for (auto &bud : childInternodeData->m_buds) {
+                for (auto &bud: childInternodeData->m_buds) {
                     if (!bud.m_active && bud.m_deathGlobalTime > value) {
                         bud.m_active = true;
                         bud.m_deathGlobalTime = -1;
@@ -2646,7 +2645,7 @@ void TreeSystem::ResetTimeForTree(const float &value) {
                             break;
                         }
                     }
-                    for (const auto &parcel : bud.m_resourceLog)
+                    for (const auto &parcel: bud.m_resourceLog)
                         bud.m_currentResource += parcel;
                     if (bud.m_currentResource.IsEnough())
                         bud.m_enoughForGrowth = true;
@@ -2680,7 +2679,7 @@ void TreeSystem::ResetTimeForTree(const Entity &internode,
             }
             ResetTimeForTree(child, globalTime);
         });
-        for (const auto &child : childrenToDelete)
+        for (const auto &child: childrenToDelete)
             EntityManager::DeleteEntity(child);
     }
 }
@@ -2757,7 +2756,7 @@ void TreeSystem::DistributeResourcesForTree(
                         auto internodeData =
                                 internode.GetOrSetPrivateComponent<InternodeData>().lock();
                         float budsRequirement = 0;
-                        for (const auto &bud : internodeData->m_buds) {
+                        for (const auto &bud: internodeData->m_buds) {
                             if (bud.m_active && !bud.m_enoughForGrowth) {
                                 budsRequirement += bud.m_resourceWeight;
                                 std::lock_guard<std::mutex> lock(maximumLock);
@@ -2794,7 +2793,7 @@ void TreeSystem::DistributeResourcesForTree(
                         auto internodeData =
                                 internode.GetOrSetPrivateComponent<InternodeData>().lock();
                         float budsRequirement = 0;
-                        for (const auto &bud : internodeData->m_buds) {
+                        for (const auto &bud: internodeData->m_buds) {
                             if (bud.m_active && !bud.m_enoughForGrowth)
                                 budsRequirement += bud.m_resourceWeight;
                         }
@@ -2815,7 +2814,7 @@ void TreeSystem::DistributeResourcesForTree(
                         const float internodeCarbon =
                                 illumination.m_currentIntensity *
                                 m_plantSystem.Get<PlantSystem>()->m_deltaTime;
-                        for (auto &bud : internodeData->m_buds) {
+                        for (auto &bud: internodeData->m_buds) {
                             if (bud.m_active && !bud.m_enoughForGrowth) {
                                 ResourceParcel resourceParcel = ResourceParcel(
                                         internodeNutrient / budsRequirement * bud.m_resourceWeight,
@@ -2839,6 +2838,38 @@ void TreeSystem::DistributeResourcesForTree(
 void TreeSystem::Start() {
     if (!m_plantSystem.Get<PlantSystem>())
         m_plantSystem = EntityManager::GetSystem<PlantSystem>();
+#pragma region General tree growth
+    m_plantSystem.Get<PlantSystem>()->m_plantMeshGenerators.insert_or_assign(
+            PlantType::GeneralTree, [&]() { GenerateMeshForTree(); });
+    m_plantSystem.Get<PlantSystem>()
+            ->m_plantSkinnedMeshGenerators.insert_or_assign(
+                    PlantType::GeneralTree, [&]() { GenerateSkinnedMeshForTree(); });
+    m_plantSystem.Get<PlantSystem>()->m_plantResourceAllocators.insert_or_assign(
+            PlantType::GeneralTree, [&](std::vector<ResourceParcel> &resources) {
+                DistributeResourcesForTree(resources);
+            });
+    m_plantSystem.Get<PlantSystem>()->m_plantGrowthModels.insert_or_assign(
+            PlantType::GeneralTree, [&](std::vector<InternodeCandidate> &candidates) {
+                FormCandidates(candidates);
+            });
+    m_plantSystem.Get<PlantSystem>()->m_plantInternodePruners.insert_or_assign(
+            PlantType::GeneralTree,
+            [&](std::vector<std::pair<GlobalTransform, Volume *>> &obstacles) {
+                PruneTrees(obstacles);
+            });
+    m_plantSystem.Get<PlantSystem>()
+            ->m_plantInternodePostProcessors.insert_or_assign(
+                    PlantType::GeneralTree,
+                    [&](const Entity &newInternode, const InternodeCandidate &candidate) {
+                        InternodePostProcessor(newInternode, candidate);
+                    });
+    m_plantSystem.Get<PlantSystem>()->m_plantMetaDataCalculators.insert_or_assign(
+            PlantType::GeneralTree, [&]() { UpdateTreesMetaData(); });
+    m_plantSystem.Get<PlantSystem>()->m_deleteAllPlants.insert_or_assign(
+            PlantType::GeneralTree, [this]() { DeleteAllPlantsHelper(); });
+#pragma endregion
+
+
     m_voxelSpaceModule.Reset();
 
     m_colorMapSegmentAmount = 3;
@@ -2875,43 +2906,7 @@ void TreeSystem::Start() {
                 std::filesystem::path(PLANT_ARCHITECT_RESOURCE_FOLDER) /
                 "Textures/BarkMaterial/Bark_Pine_normal.jpg");
 #pragma endregion
-#pragma region General tree growth
-    m_plantSystem.Get<PlantSystem>()->m_plantMeshGenerators.insert_or_assign(
-            PlantType::GeneralTree, [&]() { GenerateMeshForTree(); });
 
-    m_plantSystem.Get<PlantSystem>()
-            ->m_plantSkinnedMeshGenerators.insert_or_assign(
-                    PlantType::GeneralTree, [&]() { GenerateSkinnedMeshForTree(); });
-
-    m_plantSystem.Get<PlantSystem>()->m_plantResourceAllocators.insert_or_assign(
-            PlantType::GeneralTree, [&](std::vector<ResourceParcel> &resources) {
-                DistributeResourcesForTree(resources);
-            });
-
-    m_plantSystem.Get<PlantSystem>()->m_plantGrowthModels.insert_or_assign(
-            PlantType::GeneralTree, [&](std::vector<InternodeCandidate> &candidates) {
-                FormCandidates(candidates);
-            });
-
-    m_plantSystem.Get<PlantSystem>()->m_plantInternodePruners.insert_or_assign(
-            PlantType::GeneralTree,
-            [&](std::vector<std::pair<GlobalTransform, Volume *>> &obstacles) {
-                PruneTrees(obstacles);
-            });
-
-    m_plantSystem.Get<PlantSystem>()
-            ->m_plantInternodePostProcessors.insert_or_assign(
-                    PlantType::GeneralTree,
-                    [&](const Entity &newInternode, const InternodeCandidate &candidate) {
-                        InternodePostProcessor(newInternode, candidate);
-                    });
-
-    m_plantSystem.Get<PlantSystem>()->m_plantMetaDataCalculators.insert_or_assign(
-            PlantType::GeneralTree, [&]() { UpdateTreesMetaData(); });
-
-    m_plantSystem.Get<PlantSystem>()->m_deleteAllPlants.insert_or_assign(
-            PlantType::GeneralTree, [this]() { DeleteAllPlantsHelper(); });
-#pragma endregion
 
     m_ready = true;
 }
@@ -2930,7 +2925,7 @@ void TreeSystem::SerializeScene(const std::string &filename) {
     doc.append_node(scene);
     std::vector<Entity> trees;
     m_plantSystem.Get<PlantSystem>()->m_plantQuery.ToEntityArray(trees);
-    for (const auto &plant : trees) {
+    for (const auto &plant: trees) {
         Serialize(plant, doc, scene);
     }
     ofs << doc;
@@ -2987,7 +2982,7 @@ void TreeSystem::Serialize(const Entity &treeEntity,
         }
     });
     rootNodeIndex = 0;
-    for (const auto &i : internodes) {
+    for (const auto &i: internodes) {
         auto internodeGrowth = i.GetDataComponent<InternodeGrowth>();
         auto internodeInfo = i.GetDataComponent<InternodeInfo>();
         auto internodeStatistics = i.GetDataComponent<InternodeStatistics>();
@@ -3075,10 +3070,10 @@ void TreeSystem::Serialize(const Entity &treeEntity,
     auto *leaves = doc.allocate_node(rapidxml::node_element, "Leaves", "Leaf");
     tree->append_node(leaves);
     int counter = 0;
-    for (const auto &i : internodes) {
+    for (const auto &i: internodes) {
         glm::vec3 nodePos = i.GetDataComponent<GlobalTransform>().m_value[3];
         auto internodeData = i.GetOrSetPrivateComponent<InternodeData>().lock();
-        for (const auto &leafTransform : internodeData->m_leavesTransforms) {
+        for (const auto &leafTransform: internodeData->m_leavesTransforms) {
             auto *leaf = doc.allocate_node(rapidxml::node_element, "Leaf");
             leaf->append_attribute(doc.allocate_attribute(
                     "id", doc.allocate_string(std::to_string(counter).c_str())));

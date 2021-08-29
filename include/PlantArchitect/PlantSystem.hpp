@@ -245,13 +245,11 @@ namespace PlantArchitect {
                 std::function<void(std::vector<InternodeCandidate> &candidates)>>
                 m_plantGrowthModels;
         std::map<PlantType,
-                std::function<void(
-                        std::vector<std::pair<GlobalTransform, Volume *>> &obstacles)>>
+                std::function<void(std::vector<std::pair<GlobalTransform, Volume *>> &obstacles)>>
                 m_plantInternodePruners;
-        std::map<PlantType, std::function<void(const Entity &newInternode,
-                                               const InternodeCandidate &candidate)>>
+        std::map<PlantType,
+                std::function<void(const Entity &newInternode, const InternodeCandidate &candidate)>>
                 m_plantInternodePostProcessors;
-
         std::map<PlantType, std::function<void()>> m_plantMetaDataCalculators;
         std::map<PlantType, std::function<void()>> m_plantMeshGenerators;
         std::map<PlantType, std::function<void()>> m_plantSkinnedMeshGenerators;
