@@ -48,7 +48,7 @@ namespace PlantArchitect {
         bool m_displayPoints = true;
         bool m_displayBounds = true;
 
-        void OnGui() override;
+        void OnInspect() override;
 
         bool InVolume(const GlobalTransform &globalTransform, const glm::vec3 &position) override;
 

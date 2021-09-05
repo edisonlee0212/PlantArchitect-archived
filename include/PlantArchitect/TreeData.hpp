@@ -25,7 +25,7 @@ namespace PlantArchitect {
         glm::vec3 m_gravityDirection = glm::vec3(0, -1, 0);
 #pragma endregion
 
-        void OnGui() override;
+        void OnInspect() override;
 
         void ExportModel(const std::string &filename,
                          const bool &includeFoliage = true) const;

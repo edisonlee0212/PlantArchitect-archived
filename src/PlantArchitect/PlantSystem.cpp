@@ -3,13 +3,11 @@
 #include <Joint.hpp>
 #include <PhysicsManager.hpp>
 #include <PlantSystem.hpp>
-#include <RayTracedRenderer.hpp>
 #include <RayTracerManager.hpp>
 #include <RigidBody.hpp>
 #include <TreeSystem.hpp>
 #include <Utilities.hpp>
 #include <Volume.hpp>
-
 using namespace PlantArchitect;
 
 #pragma region GUI Related
@@ -18,7 +16,7 @@ void ResourceParcel::OnGui() const {
   ImGui::Text("%s", ("Carbon: " + std::to_string(m_carbon)).c_str());
 }
 
-void InternodeData::OnGui() {
+void InternodeData::OnInspect() {
   EditorManager::DragAndDropButton(m_thickestChild, "Thickest Child");
   EditorManager::DragAndDropButton(m_plant, "Plant");
   ImGui::Checkbox("Display points", &m_displayPoints);
@@ -864,11 +862,6 @@ void PlantSystem::Start() {
     anchorTransform.SetPosition(glm::vec3(0.0f, 0.0f, 0.0f));
     anchor.SetDataComponent(anchorTransform);
     anchor.SetParent(ground);
-
-    auto rayTracedRenderer =
-        ground.GetOrSetPrivateComponent<RayTracerFacility::RayTracedRenderer>()
-            .lock();
-    rayTracedRenderer->SyncWithMeshRenderer();
 
     auto cubeVolume = ground.GetOrSetPrivateComponent<CubeVolume>().lock();
     cubeVolume->m_asObstacle = true;

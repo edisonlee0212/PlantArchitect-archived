@@ -6,7 +6,7 @@
 
 using namespace PlantArchitect;
 
-void TreeData::OnGui() {
+void TreeData::OnInspect() {
     if (ImGui::TreeNodeEx("I/O")) {
         if (m_meshGenerated) {
             FileUtils::SaveFile("Export OBJ", "3D Model", {".obj"},

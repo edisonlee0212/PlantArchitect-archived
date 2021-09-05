@@ -1,8 +1,7 @@
-#include <RayTracedRenderer.hpp>
 #include <TreeLeaves.hpp>
 using namespace PlantArchitect;
 
-void TreeLeaves::OnGui() { ImGui::Text("Amount: %d", m_transforms.size()); }
+void TreeLeaves::OnInspect() { ImGui::Text("Amount: %d", m_transforms.size()); }
 void TreeLeaves::FormSkinnedMesh(std::vector<unsigned> &boneIndices) {
   auto quadMesh = DefaultResources::Primitives::Quad;
   auto &quadTriangles = quadMesh->UnsafeGetTriangles();
@@ -98,12 +97,6 @@ void TreeLeaves::FormMesh() {
   if (GetOwner().HasPrivateComponent<MeshRenderer>()) {
     GetOwner().GetOrSetPrivateComponent<MeshRenderer>().lock()->m_mesh =
         m_leavesMesh;
-  }
-  if (GetOwner().HasPrivateComponent<RayTracerFacility::RayTracedRenderer>()) {
-    GetOwner()
-        .GetOrSetPrivateComponent<RayTracerFacility::RayTracedRenderer>()
-        .lock()
-        ->m_mesh = m_leavesMesh;
   }
   if (GetOwner().HasPrivateComponent<SkinnedMeshRenderer>()) {
     GetOwner()

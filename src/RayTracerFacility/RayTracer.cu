@@ -36,28 +36,46 @@ void Camera::Set(const glm::quat &rotation, const glm::vec3 &position, const flo
             = cosFovY * glm::normalize(glm::cross(m_horizontal, m_direction));
 }
 
+const char *EnvironmentalLightingTypes[]{"Color", "EnvironmentalMap", "CIE"};
+const char *OutputTypes[]{"Color", "Normal", "Albedo", "DenoisedColor"};
+
 void DefaultRenderingProperties::OnGui() {
-    ImGui::Begin("Ray:Default");
-    {
-        if (ImGui::BeginChild("CameraRenderer", ImVec2(0, 0), false,
-                              ImGuiWindowFlags_None | ImGuiWindowFlags_MenuBar)) {
-            if (ImGui::BeginMenuBar()) {
-                if (ImGui::BeginMenu("Settings")) {
-                    ImGui::Checkbox("Accumulate", &m_accumulate);
-                    ImGui::DragInt("bounce limit", &m_bounceLimit, 1, 1, 8);
-                    if (ImGui::DragInt("pixel samples", &m_samplesPerPixel, 1, 1, 64)) {
-                        m_samplesPerPixel = glm::clamp(m_samplesPerPixel, 1, 128);
-                    }
-                    ImGui::Checkbox("Use environmental map", &m_useEnvironmentalMap);
-                    ImGui::DragFloat("Skylight intensity", &m_skylightIntensity, 0.01f, 0.0f, 5.0f);
-                    ImGui::EndMenu();
-                }
-                ImGui::EndMenuBar();
-            }
-        }
-        ImGui::EndChild();
+    ImGui::Checkbox("Accumulate", &m_accumulate);
+    ImGui::DragInt("bounce limit", &m_bounceLimit, 1, 1, 8);
+    if (ImGui::DragInt("pixel samples", &m_samplesPerPixel, 1, 1, 64)) {
+        m_samplesPerPixel = glm::clamp(m_samplesPerPixel, 1, 128);
     }
-    ImGui::End();
+    static int type = 0;
+    if (ImGui::Combo("Environment Lighting", &type,
+                     EnvironmentalLightingTypes,
+                     IM_ARRAYSIZE(EnvironmentalLightingTypes))) {
+        m_environmentalLightingType =
+                static_cast<EnvironmentalLightingType>(type);
+    }
+
+    ImGui::DragFloat(
+            (m_environmentalLightingType == EnvironmentalLightingType::CIE
+             ? "Env Lighting intensity"
+             : "Zenith radiance"),
+            &m_skylightIntensity, 0.01f, 0.0f, 5.0f);
+
+    static glm::vec2 angles = glm::vec2(90, 0);
+    if (ImGui::DragFloat2("Skylight Direction (X/Y axis)", &angles.x, 1.0f, 0.0f,
+                          180.0f)) {
+        m_sunDirection =
+                glm::quat(glm::radians(glm::vec3(angles.x, angles.y, 0.0f))) * glm::vec3(0, 0, -1);
+    }
+    if (m_environmentalLightingType !=
+        EnvironmentalLightingType::EnvironmentalMap) {
+        ImGui::ColorEdit3("Sky light color", &m_sunColor.x);
+    }
+    static int outputType = 0;
+    if (ImGui::Combo("Output Type", &outputType,
+                     OutputTypes,
+                     IM_ARRAYSIZE(OutputTypes))) {
+        m_outputType =
+                static_cast<OutputType>(outputType);
+    }
 }
 
 bool RayTracer::RenderDefault(const DefaultRenderingProperties &properties) {
@@ -66,17 +84,22 @@ bool RayTracer::RenderDefault(const DefaultRenderingProperties &properties) {
     std::vector<std::pair<unsigned, cudaTextureObject_t>> boundTextures;
     std::vector<cudaGraphicsResource_t> boundResources;
     BuildShaderBindingTable(boundTextures, boundResources);
+    if (properties.m_frameSize != m_defaultRenderingLaunchParams.m_defaultRenderingProperties.m_frameSize) {
+        Resize(properties.m_frameSize);
+        m_defaultRenderingPipeline.m_statusChanged = true;
+    }
+
     if (m_defaultRenderingLaunchParams.m_defaultRenderingProperties.Changed(properties)) {
         m_defaultRenderingLaunchParams.m_defaultRenderingProperties = properties;
         m_defaultRenderingPipeline.m_statusChanged = true;
     }
-    if (!m_defaultRenderingPipeline.m_accumulate || m_defaultRenderingPipeline.m_statusChanged) {
+    if (!m_defaultRenderingLaunchParams.m_defaultRenderingProperties.m_accumulate ||
+        m_defaultRenderingPipeline.m_statusChanged) {
         m_defaultRenderingLaunchParams.m_frame.m_frameId = 0;
         m_defaultRenderingPipeline.m_statusChanged = false;
     }
-#pragma region Bind texture
-    cudaArray_t outputArray;
-    cudaGraphicsResource_t outputTexture;
+#pragma region Bind environmental map as cudaTexture
+    struct cudaResourceDesc cudaResourceDesc;
     cudaArray_t environmentalMapPosXArray;
     cudaArray_t environmentalMapNegXArray;
     cudaArray_t environmentalMapPosYArray;
@@ -84,72 +107,71 @@ bool RayTracer::RenderDefault(const DefaultRenderingProperties &properties) {
     cudaArray_t environmentalMapPosZArray;
     cudaArray_t environmentalMapNegZArray;
     cudaGraphicsResource_t environmentalMapTexture;
-#pragma region Bind output texture as cudaSurface
-    CUDA_CHECK(GraphicsGLRegisterImage(&outputTexture,
-                                       m_defaultRenderingLaunchParams.m_defaultRenderingProperties.m_outputTextureId,
-                                       GL_TEXTURE_2D, cudaGraphicsRegisterFlagsNone));
-    CUDA_CHECK(GraphicsMapResources(1, &outputTexture, nullptr));
-    CUDA_CHECK(GraphicsSubResourceGetMappedArray(&outputArray, outputTexture, 0, 0));
-    // Specify surface
-    struct cudaResourceDesc cudaResourceDesc;
-    memset(&cudaResourceDesc, 0, sizeof(cudaResourceDesc));
-    cudaResourceDesc.resType = cudaResourceTypeArray;
-    // Create the surface objects
-    cudaResourceDesc.res.array.array = outputArray;
-    // Create surface object
-    CUDA_CHECK(CreateSurfaceObject(&m_defaultRenderingLaunchParams.m_frame.m_outputTexture, &cudaResourceDesc));
-#pragma endregion
-#pragma region Bind environmental map as cudaTexture
-    CUDA_CHECK(GraphicsGLRegisterImage(&environmentalMapTexture,
-                                       m_defaultRenderingLaunchParams.m_defaultRenderingProperties.m_environmentalMapId,
-                                       GL_TEXTURE_CUBE_MAP, cudaGraphicsRegisterFlagsNone));
-    CUDA_CHECK(GraphicsMapResources(1, &environmentalMapTexture, nullptr));
-    CUDA_CHECK(GraphicsSubResourceGetMappedArray(&environmentalMapPosXArray, environmentalMapTexture,
-                                                 cudaGraphicsCubeFacePositiveX, 0));
-    CUDA_CHECK(GraphicsSubResourceGetMappedArray(&environmentalMapNegXArray, environmentalMapTexture,
-                                                 cudaGraphicsCubeFaceNegativeX, 0));
-    CUDA_CHECK(GraphicsSubResourceGetMappedArray(&environmentalMapPosYArray, environmentalMapTexture,
-                                                 cudaGraphicsCubeFacePositiveY, 0));
-    CUDA_CHECK(GraphicsSubResourceGetMappedArray(&environmentalMapNegYArray, environmentalMapTexture,
-                                                 cudaGraphicsCubeFaceNegativeY, 0));
-    CUDA_CHECK(GraphicsSubResourceGetMappedArray(&environmentalMapPosZArray, environmentalMapTexture,
-                                                 cudaGraphicsCubeFacePositiveZ, 0));
-    CUDA_CHECK(GraphicsSubResourceGetMappedArray(&environmentalMapNegZArray, environmentalMapTexture,
-                                                 cudaGraphicsCubeFaceNegativeZ, 0));
-    memset(&cudaResourceDesc, 0, sizeof(cudaResourceDesc));
-    cudaResourceDesc.resType = cudaResourceTypeArray;
-    struct cudaTextureDesc cudaTextureDesc;
-    memset(&cudaTextureDesc, 0, sizeof(cudaTextureDesc));
-    cudaTextureDesc.addressMode[0] = cudaAddressModeWrap;
-    cudaTextureDesc.addressMode[1] = cudaAddressModeWrap;
-    cudaTextureDesc.filterMode = cudaFilterModeLinear;
-    cudaTextureDesc.readMode = cudaReadModeElementType;
-    cudaTextureDesc.normalizedCoords = 1;
-    // Create texture object
-    cudaResourceDesc.res.array.array = environmentalMapPosXArray;
-    CUDA_CHECK(CreateTextureObject(&m_defaultRenderingLaunchParams.m_skylight.m_environmentalMaps[0], &cudaResourceDesc,
-                                   &cudaTextureDesc, nullptr));
-    cudaResourceDesc.res.array.array = environmentalMapNegXArray;
-    CUDA_CHECK(CreateTextureObject(&m_defaultRenderingLaunchParams.m_skylight.m_environmentalMaps[1], &cudaResourceDesc,
-                                   &cudaTextureDesc, nullptr));
-    cudaResourceDesc.res.array.array = environmentalMapPosYArray;
-    CUDA_CHECK(CreateTextureObject(&m_defaultRenderingLaunchParams.m_skylight.m_environmentalMaps[2], &cudaResourceDesc,
-                                   &cudaTextureDesc, nullptr));
-    cudaResourceDesc.res.array.array = environmentalMapNegYArray;
-    CUDA_CHECK(CreateTextureObject(&m_defaultRenderingLaunchParams.m_skylight.m_environmentalMaps[3], &cudaResourceDesc,
-                                   &cudaTextureDesc, nullptr));
-    cudaResourceDesc.res.array.array = environmentalMapPosZArray;
-    CUDA_CHECK(CreateTextureObject(&m_defaultRenderingLaunchParams.m_skylight.m_environmentalMaps[4], &cudaResourceDesc,
-                                   &cudaTextureDesc, nullptr));
-    cudaResourceDesc.res.array.array = environmentalMapNegZArray;
-    CUDA_CHECK(CreateTextureObject(&m_defaultRenderingLaunchParams.m_skylight.m_environmentalMaps[5], &cudaResourceDesc,
-                                   &cudaTextureDesc, nullptr));
-#pragma endregion
+    if (m_defaultRenderingLaunchParams.m_defaultRenderingProperties.m_environmentalMapId != 0) {
+        CUDA_CHECK(GraphicsGLRegisterImage(&environmentalMapTexture,
+                                           m_defaultRenderingLaunchParams.m_defaultRenderingProperties.m_environmentalMapId,
+                                           GL_TEXTURE_CUBE_MAP, cudaGraphicsRegisterFlagsNone));
+        CUDA_CHECK(GraphicsMapResources(1, &environmentalMapTexture, nullptr));
+        CUDA_CHECK(GraphicsSubResourceGetMappedArray(&environmentalMapPosXArray, environmentalMapTexture,
+                                                     cudaGraphicsCubeFacePositiveX, 0));
+        CUDA_CHECK(GraphicsSubResourceGetMappedArray(&environmentalMapNegXArray, environmentalMapTexture,
+                                                     cudaGraphicsCubeFaceNegativeX, 0));
+        CUDA_CHECK(GraphicsSubResourceGetMappedArray(&environmentalMapPosYArray, environmentalMapTexture,
+                                                     cudaGraphicsCubeFacePositiveY, 0));
+        CUDA_CHECK(GraphicsSubResourceGetMappedArray(&environmentalMapNegYArray, environmentalMapTexture,
+                                                     cudaGraphicsCubeFaceNegativeY, 0));
+        CUDA_CHECK(GraphicsSubResourceGetMappedArray(&environmentalMapPosZArray, environmentalMapTexture,
+                                                     cudaGraphicsCubeFacePositiveZ, 0));
+        CUDA_CHECK(GraphicsSubResourceGetMappedArray(&environmentalMapNegZArray, environmentalMapTexture,
+                                                     cudaGraphicsCubeFaceNegativeZ, 0));
+        memset(&cudaResourceDesc, 0, sizeof(cudaResourceDesc));
+        cudaResourceDesc.resType = cudaResourceTypeArray;
+        struct cudaTextureDesc cudaTextureDesc;
+        memset(&cudaTextureDesc, 0, sizeof(cudaTextureDesc));
+        cudaTextureDesc.addressMode[0] = cudaAddressModeWrap;
+        cudaTextureDesc.addressMode[1] = cudaAddressModeWrap;
+        cudaTextureDesc.filterMode = cudaFilterModeLinear;
+        cudaTextureDesc.readMode = cudaReadModeElementType;
+        cudaTextureDesc.normalizedCoords = 1;
+        // Create texture object
+        cudaResourceDesc.res.array.array = environmentalMapPosXArray;
+        CUDA_CHECK(CreateTextureObject(&m_defaultRenderingLaunchParams.m_skylight.m_environmentalMaps[0],
+                                       &cudaResourceDesc,
+                                       &cudaTextureDesc, nullptr));
+        cudaResourceDesc.res.array.array = environmentalMapNegXArray;
+        CUDA_CHECK(CreateTextureObject(&m_defaultRenderingLaunchParams.m_skylight.m_environmentalMaps[1],
+                                       &cudaResourceDesc,
+                                       &cudaTextureDesc, nullptr));
+        cudaResourceDesc.res.array.array = environmentalMapPosYArray;
+        CUDA_CHECK(CreateTextureObject(&m_defaultRenderingLaunchParams.m_skylight.m_environmentalMaps[2],
+                                       &cudaResourceDesc,
+                                       &cudaTextureDesc, nullptr));
+        cudaResourceDesc.res.array.array = environmentalMapNegYArray;
+        CUDA_CHECK(CreateTextureObject(&m_defaultRenderingLaunchParams.m_skylight.m_environmentalMaps[3],
+                                       &cudaResourceDesc,
+                                       &cudaTextureDesc, nullptr));
+        cudaResourceDesc.res.array.array = environmentalMapPosZArray;
+        CUDA_CHECK(CreateTextureObject(&m_defaultRenderingLaunchParams.m_skylight.m_environmentalMaps[4],
+                                       &cudaResourceDesc,
+                                       &cudaTextureDesc, nullptr));
+        cudaResourceDesc.res.array.array = environmentalMapNegZArray;
+        CUDA_CHECK(CreateTextureObject(&m_defaultRenderingLaunchParams.m_skylight.m_environmentalMaps[5],
+                                       &cudaResourceDesc,
+                                       &cudaTextureDesc, nullptr));
+    } else {
+        m_defaultRenderingLaunchParams.m_skylight.m_environmentalMaps[0] = 0;
+        m_defaultRenderingLaunchParams.m_skylight.m_environmentalMaps[1] = 0;
+        m_defaultRenderingLaunchParams.m_skylight.m_environmentalMaps[2] = 0;
+        m_defaultRenderingLaunchParams.m_skylight.m_environmentalMaps[3] = 0;
+        m_defaultRenderingLaunchParams.m_skylight.m_environmentalMaps[4] = 0;
+        m_defaultRenderingLaunchParams.m_skylight.m_environmentalMaps[5] = 0;
+    }
 #pragma endregion
 #pragma region Upload parameters
-    m_defaultRenderingPipeline.m_launchParamsBuffer.Upload(&m_defaultRenderingLaunchParams, 1);
+    m_defaultRenderingPipeline.m_launchParamsBuffer.
+            Upload(&m_defaultRenderingLaunchParams,
+                   1);
     m_defaultRenderingLaunchParams.m_frame.m_frameId++;
-#pragma endregion
 #pragma endregion
 #pragma region Launch rays from camera
     OPTIX_CHECK(optixLaunch(/*! pipeline we're launching launch: */
@@ -165,34 +187,184 @@ bool RayTracer::RenderDefault(const DefaultRenderingProperties &properties) {
     ));
 #pragma endregion
     CUDA_SYNC_CHECK();
-#pragma region Remove texture binding.
-    CUDA_CHECK(DestroySurfaceObject(m_defaultRenderingLaunchParams.m_frame.m_outputTexture));
-    m_defaultRenderingLaunchParams.m_frame.m_outputTexture = 0;
-    CUDA_CHECK(GraphicsUnmapResources(1, &outputTexture, 0));
-    CUDA_CHECK(GraphicsUnregisterResource(outputTexture));
+#pragma region Remove textures binding.
+    if (m_defaultRenderingLaunchParams.m_defaultRenderingProperties.m_environmentalMapId != 0) {
+        CUDA_CHECK(DestroyTextureObject(m_defaultRenderingLaunchParams.m_skylight.m_environmentalMaps[0]));
+        m_defaultRenderingLaunchParams.m_skylight.m_environmentalMaps[0] = 0;
+        CUDA_CHECK(DestroyTextureObject(m_defaultRenderingLaunchParams.m_skylight.m_environmentalMaps[1]));
+        m_defaultRenderingLaunchParams.m_skylight.m_environmentalMaps[1] = 0;
+        CUDA_CHECK(DestroyTextureObject(m_defaultRenderingLaunchParams.m_skylight.m_environmentalMaps[2]));
+        m_defaultRenderingLaunchParams.m_skylight.m_environmentalMaps[2] = 0;
+        CUDA_CHECK(DestroyTextureObject(m_defaultRenderingLaunchParams.m_skylight.m_environmentalMaps[3]));
+        m_defaultRenderingLaunchParams.m_skylight.m_environmentalMaps[3] = 0;
+        CUDA_CHECK(DestroyTextureObject(m_defaultRenderingLaunchParams.m_skylight.m_environmentalMaps[4]));
+        m_defaultRenderingLaunchParams.m_skylight.m_environmentalMaps[4] = 0;
+        CUDA_CHECK(DestroyTextureObject(m_defaultRenderingLaunchParams.m_skylight.m_environmentalMaps[5]));
+        m_defaultRenderingLaunchParams.m_skylight.m_environmentalMaps[5] = 0;
 
-    CUDA_CHECK(DestroyTextureObject(m_defaultRenderingLaunchParams.m_skylight.m_environmentalMaps[0]));
-    m_defaultRenderingLaunchParams.m_skylight.m_environmentalMaps[0] = 0;
-    CUDA_CHECK(DestroyTextureObject(m_defaultRenderingLaunchParams.m_skylight.m_environmentalMaps[1]));
-    m_defaultRenderingLaunchParams.m_skylight.m_environmentalMaps[1] = 0;
-    CUDA_CHECK(DestroyTextureObject(m_defaultRenderingLaunchParams.m_skylight.m_environmentalMaps[2]));
-    m_defaultRenderingLaunchParams.m_skylight.m_environmentalMaps[2] = 0;
-    CUDA_CHECK(DestroyTextureObject(m_defaultRenderingLaunchParams.m_skylight.m_environmentalMaps[3]));
-    m_defaultRenderingLaunchParams.m_skylight.m_environmentalMaps[3] = 0;
-    CUDA_CHECK(DestroyTextureObject(m_defaultRenderingLaunchParams.m_skylight.m_environmentalMaps[4]));
-    m_defaultRenderingLaunchParams.m_skylight.m_environmentalMaps[4] = 0;
-    CUDA_CHECK(DestroyTextureObject(m_defaultRenderingLaunchParams.m_skylight.m_environmentalMaps[5]));
-    m_defaultRenderingLaunchParams.m_skylight.m_environmentalMaps[5] = 0;
-
-    CUDA_CHECK(GraphicsUnmapResources(1, &environmentalMapTexture, 0));
-    CUDA_CHECK(GraphicsUnregisterResource(environmentalMapTexture));
-#pragma endregion
-
+        CUDA_CHECK(GraphicsUnmapResources(1, &environmentalMapTexture, 0));
+        CUDA_CHECK(GraphicsUnregisterResource(environmentalMapTexture));
+    }
     for (int i = 0; i < boundResources.size(); i++) {
         CUDA_CHECK(DestroySurfaceObject(boundTextures[i].second));
         CUDA_CHECK(GraphicsUnmapResources(1, &boundResources[i], 0));
         CUDA_CHECK(GraphicsUnregisterResource(boundResources[i]));
     }
+#pragma endregion
+#pragma region Bind output texture
+    cudaArray_t outputArray;
+    cudaGraphicsResource_t outputTexture;
+    CUDA_CHECK(GraphicsGLRegisterImage(&outputTexture,
+                                       m_defaultRenderingLaunchParams.m_defaultRenderingProperties.m_outputTextureId,
+                                       GL_TEXTURE_2D, cudaGraphicsRegisterFlagsNone));
+    CUDA_CHECK(GraphicsMapResources(1, &outputTexture, nullptr));
+    CUDA_CHECK(GraphicsSubResourceGetMappedArray(&outputArray, outputTexture, 0, 0));
+    /*
+    // Specify surface
+    memset(&cudaResourceDesc, 0, sizeof(cudaResourceDesc));
+    cudaResourceDesc.resType = cudaResourceTypeArray;
+    // Create the surface objects
+    cudaResourceDesc.res.array.array = outputArray;
+    // Create surface object
+    cudaSurfaceObject_t outputTextureId;
+    CUDA_CHECK(CreateSurfaceObject(&outputTextureId, &cudaResourceDesc));
+    */
+#pragma endregion
+#pragma region Copy results to output texture
+    OptixImage2D inputLayer[3];
+    inputLayer[0].data = m_frameBufferColor.DevicePointer();
+    /// Width of the image (in pixels)
+    inputLayer[0].width = m_defaultRenderingLaunchParams.m_frame.size.x;
+    /// Height of the image (in pixels)
+    inputLayer[0].height = m_defaultRenderingLaunchParams.m_frame.size.y;
+    /// Stride between subsequent rows of the image (in bytes).
+    inputLayer[0].rowStrideInBytes = m_defaultRenderingLaunchParams.m_frame.size.x * sizeof(glm::vec4);
+    /// Stride between subsequent pixels of the image (in bytes).
+    /// For now, only 0 or the value that corresponds to a dense packing of pixels (no gaps) is supported.
+    inputLayer[0].pixelStrideInBytes = sizeof(glm::vec4);
+    /// Pixel format.
+    inputLayer[0].format = OPTIX_PIXEL_FORMAT_FLOAT4;
+
+    // ..................................................................
+    inputLayer[1].data = m_frameBufferAlbedo.DevicePointer();
+    /// Width of the image (in pixels)
+    inputLayer[1].width = m_defaultRenderingLaunchParams.m_frame.size.x;
+    /// Height of the image (in pixels)
+    inputLayer[1].height = m_defaultRenderingLaunchParams.m_frame.size.y;
+    /// Stride between subsequent rows of the image (in bytes).
+    inputLayer[1].rowStrideInBytes = m_defaultRenderingLaunchParams.m_frame.size.x * sizeof(glm::vec4);
+    /// Stride between subsequent pixels of the image (in bytes).
+    /// For now, only 0 or the value that corresponds to a dense packing of pixels (no gaps) is supported.
+    inputLayer[1].pixelStrideInBytes = sizeof(glm::vec4);
+    /// Pixel format.
+    inputLayer[1].format = OPTIX_PIXEL_FORMAT_FLOAT4;
+
+    // ..................................................................
+    inputLayer[2].data = m_frameBufferNormal.DevicePointer();
+    /// Width of the image (in pixels)
+    inputLayer[2].width = m_defaultRenderingLaunchParams.m_frame.size.x;
+    /// Height of the image (in pixels)
+    inputLayer[2].height = m_defaultRenderingLaunchParams.m_frame.size.y;
+    /// Stride between subsequent rows of the image (in bytes).
+    inputLayer[2].rowStrideInBytes = m_defaultRenderingLaunchParams.m_frame.size.x * sizeof(glm::vec4);
+    /// Stride between subsequent pixels of the image (in bytes).
+    /// For now, only 0 or the value that corresponds to a dense packing of pixels (no gaps) is supported.
+    inputLayer[2].pixelStrideInBytes = sizeof(glm::vec4);
+    /// Pixel format.
+    inputLayer[2].format = OPTIX_PIXEL_FORMAT_FLOAT4;
+
+    // -------------------------------------------------------
+    OptixImage2D outputLayer;
+    outputLayer.data = m_denoisedBuffer.DevicePointer();
+    /// Width of the image (in pixels)
+    outputLayer.width = m_defaultRenderingLaunchParams.m_frame.size.x;
+    /// Height of the image (in pixels)
+    outputLayer.height = m_defaultRenderingLaunchParams.m_frame.size.y;
+    /// Stride between subsequent rows of the image (in bytes).
+    outputLayer.rowStrideInBytes = m_defaultRenderingLaunchParams.m_frame.size.x * sizeof(glm::vec4);
+    /// Stride between subsequent pixels of the image (in bytes).
+    /// For now, only 0 or the value that corresponds to a dense packing of pixels (no gaps) is supported.
+    outputLayer.pixelStrideInBytes = sizeof(glm::vec4);
+    /// Pixel format.
+    outputLayer.format = OPTIX_PIXEL_FORMAT_FLOAT4;
+    switch (m_defaultRenderingLaunchParams.m_defaultRenderingProperties.m_outputType) {
+        case OutputType::Color: {
+            CUDA_CHECK(MemcpyToArray(outputArray, 0, 0, (void *) m_frameBufferColor.DevicePointer(),
+                                     sizeof(glm::vec4) * m_defaultRenderingLaunchParams.m_frame.size.x *
+                                     m_defaultRenderingLaunchParams.m_frame.size.y,
+                                     cudaMemcpyDeviceToDevice));
+        }
+            break;
+        case OutputType::Normal: {
+            CUDA_CHECK(MemcpyToArray(outputArray, 0, 0, (void *) m_frameBufferNormal.DevicePointer(),
+                                     sizeof(glm::vec4) * m_defaultRenderingLaunchParams.m_frame.size.x *
+                                     m_defaultRenderingLaunchParams.m_frame.size.y,
+                                     cudaMemcpyDeviceToDevice));
+        }
+            break;
+        case OutputType::Albedo: {
+            CUDA_CHECK(MemcpyToArray(outputArray, 0, 0, (void *) m_frameBufferAlbedo.DevicePointer(),
+                                     sizeof(glm::vec4) * m_defaultRenderingLaunchParams.m_frame.size.x *
+                                     m_defaultRenderingLaunchParams.m_frame.size.y,
+                                     cudaMemcpyDeviceToDevice));
+        }
+            break;
+        case OutputType::DenoisedColor: {
+            OptixDenoiserParams denoiserParams;
+            denoiserParams.denoiseAlpha = 1;
+            m_denoiserIntensity.Resize(sizeof(float));
+            if (m_denoiserIntensity.m_sizeInBytes != sizeof(float))
+                m_denoiserIntensity.Resize(sizeof(float));
+            denoiserParams.hdrIntensity = m_denoiserIntensity.DevicePointer();
+            if (m_defaultRenderingLaunchParams.m_defaultRenderingProperties.m_accumulate &&
+                m_defaultRenderingLaunchParams.m_frame.m_frameId > 1)
+                denoiserParams.blendFactor = 1.f / m_defaultRenderingLaunchParams.m_frame.m_frameId;
+            else
+                denoiserParams.blendFactor = 0.0f;
+
+            OPTIX_CHECK(optixDenoiserComputeIntensity
+                                (m_denoiser,
+                                        /*stream*/0,
+                                 &inputLayer[0],
+                                 (CUdeviceptr) m_denoiserIntensity.DevicePointer(),
+                                 (CUdeviceptr) m_denoiserScratch.DevicePointer(),
+                                 m_denoiserScratch.m_sizeInBytes));
+
+            OptixDenoiserLayer denoiserLayer = {};
+            denoiserLayer.input = inputLayer[0];
+            denoiserLayer.output = outputLayer;
+
+            OptixDenoiserGuideLayer denoiserGuideLayer = {};
+            denoiserGuideLayer.albedo = inputLayer[1];
+            denoiserGuideLayer.normal = inputLayer[2];
+
+            OPTIX_CHECK(optixDenoiserInvoke(m_denoiser,
+                    /*stream*/0,
+                                            &denoiserParams,
+                                            m_denoiserState.DevicePointer(),
+                                            m_denoiserState.m_sizeInBytes,
+                                            &denoiserGuideLayer,
+                                            &denoiserLayer, 1,
+                    /*inputOffsetX*/0,
+                    /*inputOffsetY*/0,
+                                            m_denoiserScratch.DevicePointer(),
+                                            m_denoiserScratch.m_sizeInBytes));
+            CUDA_CHECK(MemcpyToArray(outputArray, 0, 0, (void *) outputLayer.data,
+                                     sizeof(glm::vec4) * m_defaultRenderingLaunchParams.m_frame.size.x *
+                                     m_defaultRenderingLaunchParams.m_frame.size.y,
+                                     cudaMemcpyDeviceToDevice));
+        }
+            break;
+    }
+
+#pragma endregion
+#pragma region UnBind output texture
+    //CUDA_CHECK(DestroySurfaceObject(outputTextureId));
+    CUDA_CHECK(GraphicsUnmapResources(1, &outputTexture, 0));
+    CUDA_CHECK(GraphicsUnregisterResource(outputTexture));
+#pragma endregion
+
+
     return true;
 }
 
@@ -253,6 +425,10 @@ RayTracer::RayTracer() {
 
     std::cout << "#Optix: context, module, pipeline, etc, all set up ..." << std::endl;
 
+    MLVQMaterialStorage storage;
+    storage.m_material = std::make_shared<MLVQMaterial>();
+    storage.m_buffer.Upload(storage.m_material.get(), 1);
+    m_MLVQMaterialStorage.push_back(storage);
 }
 
 void RayTracer::SetSkylightSize(const float &value) {
@@ -440,20 +616,80 @@ void RayTracer::CreateHitGroupPrograms() {
 __global__ void ApplyTransformKernel(
         int size, glm::mat4 globalTransform,
         Vertex *vertices,
-        glm::vec3 *targetPositions) {
+        glm::vec3 *targetPositions,
+        glm::vec3 *targetNormals,
+        glm::vec3 *targetTangents,
+        glm::vec2 *targetTexCoords) {
     const int idx = threadIdx.x + blockIdx.x * blockDim.x;
     if (idx < size) {
         targetPositions[idx] = globalTransform * glm::vec4(vertices[idx].m_position, 1.0f);
-        //targetNormals[idx] = glm::normalize(globalTransform * glm::vec4(vertices[idx].m_normal, 0.0f));
-        //targetTangents[idx] = glm::normalize(globalTransform * glm::vec4(vertices[idx].m_tangent, 0.0f));
+        glm::vec3 N = glm::normalize(globalTransform * glm::vec4(vertices[idx].m_normal, 0.0f));
+        glm::vec3 T = glm::normalize(globalTransform * glm::vec4(vertices[idx].m_tangent, 0.0f));
+        T = glm::normalize(T - dot(T, N) * N);
+        targetNormals[idx] = N;
+        targetTangents[idx] = T;
+        targetTexCoords[idx] = vertices[idx].m_texCoords;
+    }
+}
+
+__global__ void ApplySkinnedTransformKernel(
+        int size, glm::mat4 globalTransform,
+        SkinnedVertex *vertices,
+        glm::mat4 *boneMatrices,
+        glm::vec3 *targetPositions,
+        glm::vec3 *targetNormals,
+        glm::vec3 *targetTangents,
+        glm::vec2 *targetTexCoords) {
+    const int idx = threadIdx.x + blockIdx.x * blockDim.x;
+    if (idx < size) {
+        glm::mat4 boneTransform = boneMatrices[vertices[idx].m_bondId[0]] * vertices[idx].m_weight[0];
+        if (vertices[idx].m_bondId[1] != -1) {
+            boneTransform += boneMatrices[vertices[idx].m_bondId[1]] * vertices[idx].m_weight[1];
+        }
+        if (vertices[idx].m_bondId[2] != -1) {
+            boneTransform += boneMatrices[vertices[idx].m_bondId[2]] * vertices[idx].m_weight[2];
+        }
+        if (vertices[idx].m_bondId[3] != -1) {
+            boneTransform += boneMatrices[vertices[idx].m_bondId[3]] * vertices[idx].m_weight[3];
+        }
+        if (vertices[idx].m_bondId2[0] != -1) {
+            boneTransform += boneMatrices[vertices[idx].m_bondId2[0]] * vertices[idx].m_weight2[0];
+        }
+        if (vertices[idx].m_bondId2[1] != -1) {
+            boneTransform += boneMatrices[vertices[idx].m_bondId2[1]] * vertices[idx].m_weight2[1];
+        }
+        if (vertices[idx].m_bondId2[2] != -1) {
+            boneTransform += boneMatrices[vertices[idx].m_bondId2[2]] * vertices[idx].m_weight2[2];
+        }
+        if (vertices[idx].m_bondId2[3] != -1) {
+            boneTransform += boneMatrices[vertices[idx].m_bondId2[3]] * vertices[idx].m_weight2[3];
+        }
+
+        targetPositions[idx] = boneTransform * glm::vec4(vertices[idx].m_position, 1.0f);
+        glm::vec3 N = glm::normalize(boneTransform * glm::vec4(vertices[idx].m_normal, 0.0f));
+        glm::vec3 T = glm::normalize(boneTransform * glm::vec4(vertices[idx].m_tangent, 0.0f));
+        T = glm::normalize(T - dot(T, N) * N);
+        targetNormals[idx] = N;
+        targetTangents[idx] = T;
+        targetTexCoords[idx] = vertices[idx].m_texCoords;
     }
 }
 
 void RayTracer::BuildAccelerationStructure() {
     bool uploadVertices = false;
-    if (m_verticesBuffer.size() != m_instances.size()) uploadVertices = true;
-    else {
-        for (auto &i : m_instances) {
+    int instanceSize = m_instances.size() + m_skinnedInstances.size();
+    if (m_verticesBuffer.size() != instanceSize) uploadVertices = true;
+    if (!uploadVertices) {
+        for (auto &i: m_instances) {
+            if (i.m_verticesUpdateFlag) {
+                uploadVertices = true;
+                break;
+            }
+        }
+
+    }
+    if (!uploadVertices) {
+        for (auto &i: m_skinnedInstances) {
             if (i.m_verticesUpdateFlag) {
                 uploadVertices = true;
                 break;
@@ -461,35 +697,51 @@ void RayTracer::BuildAccelerationStructure() {
         }
     }
     if (uploadVertices) {
-        for (auto &i : m_verticesBuffer) i.Free();
-        for (auto &i : m_trianglesBuffer) i.Free();
-        for (auto &i : m_transformedPositionsBuffer) i.Free();
+        for (auto &i: m_verticesBuffer) i.Free();
+        for (auto &i: m_trianglesBuffer) i.Free();
+        for (auto &i: m_transformedPositionsBuffer) i.Free();
+        for (auto &i: m_transformedNormalsBuffer) i.Free();
+        for (auto &i: m_transformedTangentBuffer) i.Free();
+        for (auto &i: m_texCoordBuffer) i.Free();
+        for (auto &i: m_boneMatricesBuffer) i.Free();
+
 
         m_verticesBuffer.clear();
         m_trianglesBuffer.clear();
         m_transformedPositionsBuffer.clear();
+        m_transformedNormalsBuffer.clear();
+        m_transformedTangentBuffer.clear();
+        m_texCoordBuffer.clear();
+        m_boneMatricesBuffer.clear();
 
-        m_verticesBuffer.resize(m_instances.size());
-        m_trianglesBuffer.resize(m_instances.size());
-        m_transformedPositionsBuffer.resize(m_instances.size());
+        m_verticesBuffer.resize(instanceSize);
+        m_trianglesBuffer.resize(instanceSize);
+        m_transformedPositionsBuffer.resize(instanceSize);
+        m_transformedNormalsBuffer.resize(instanceSize);
+        m_transformedTangentBuffer.resize(instanceSize);
+        m_texCoordBuffer.resize(instanceSize);
+        m_boneMatricesBuffer.resize(instanceSize);
     }
     OptixTraversableHandle asHandle = 0;
 
     // ==================================================================
     // triangle inputs
     // ==================================================================
-    std::vector<OptixBuildInput> triangleInput(m_instances.size());
-    std::vector<CUdeviceptr> deviceVertexPositions(m_instances.size());
-    std::vector<CUdeviceptr> deviceVertexTriangles(m_instances.size());
-    std::vector<CUdeviceptr> deviceTransforms(m_instances.size());
-    std::vector<uint32_t> triangleInputFlags(m_instances.size());
-
-    for (int meshID = 0; meshID < m_instances.size(); meshID++) {
+    std::vector<OptixBuildInput> triangleInput(instanceSize);
+    std::vector<CUdeviceptr> deviceVertexPositions(instanceSize);
+    std::vector<CUdeviceptr> deviceVertexTriangles(instanceSize);
+    std::vector<CUdeviceptr> deviceTransforms(instanceSize);
+    std::vector<uint32_t> triangleInputFlags(instanceSize);
+    int meshID = 0;
+    for (; meshID < m_instances.size(); meshID++) {
         // upload the model to the device: the builder
         RayTracerInstance &triangleMesh = m_instances[meshID];
         if (uploadVertices) {
             m_verticesBuffer[meshID].Upload(*triangleMesh.m_vertices);
             m_transformedPositionsBuffer[meshID].Resize(triangleMesh.m_vertices->size() * sizeof(glm::vec3));
+            m_transformedNormalsBuffer[meshID].Resize(triangleMesh.m_vertices->size() * sizeof(glm::vec3));
+            m_transformedTangentBuffer[meshID].Resize(triangleMesh.m_vertices->size() * sizeof(glm::vec3));
+            m_texCoordBuffer[meshID].Resize(triangleMesh.m_vertices->size() * sizeof(glm::vec3));
         }
 
         if (uploadVertices || triangleMesh.m_transformUpdateFlag) {
@@ -501,7 +753,10 @@ void RayTracer::BuildAccelerationStructure() {
             gridSize = (size + blockSize - 1) / blockSize;
             ApplyTransformKernel << < gridSize, blockSize >> > (size, triangleMesh.m_globalTransform,
                     static_cast<Vertex *>(m_verticesBuffer[meshID].m_dPtr),
-                    static_cast<glm::vec3 *>(m_transformedPositionsBuffer[meshID].m_dPtr));
+                    static_cast<glm::vec3 *>(m_transformedPositionsBuffer[meshID].m_dPtr),
+                    static_cast<glm::vec3 *>(m_transformedNormalsBuffer[meshID].m_dPtr),
+                    static_cast<glm::vec3 *>(m_transformedTangentBuffer[meshID].m_dPtr),
+                    static_cast<glm::vec2 *>(m_texCoordBuffer[meshID].m_dPtr));
             CUDA_SYNC_CHECK();
         }
 
@@ -540,6 +795,71 @@ void RayTracer::BuildAccelerationStructure() {
         triangleInput[meshID].triangleArray.sbtIndexOffsetSizeInBytes = 0;
         triangleInput[meshID].triangleArray.sbtIndexOffsetStrideInBytes = 0;
     }
+    for (; meshID < instanceSize; meshID++) {
+        // upload the model to the device: the builder
+        SkinnedRayTracerInstance &triangleMesh = m_skinnedInstances[meshID - m_instances.size()];
+        if (uploadVertices) {
+            m_verticesBuffer[meshID].Upload(*triangleMesh.m_skinnedVertices);
+            m_boneMatricesBuffer[meshID].Upload(*triangleMesh.m_boneMatrices);
+
+            m_transformedPositionsBuffer[meshID].Resize(triangleMesh.m_skinnedVertices->size() * sizeof(glm::vec3));
+            m_transformedNormalsBuffer[meshID].Resize(triangleMesh.m_skinnedVertices->size() * sizeof(glm::vec3));
+            m_transformedTangentBuffer[meshID].Resize(triangleMesh.m_skinnedVertices->size() * sizeof(glm::vec3));
+            m_texCoordBuffer[meshID].Resize(triangleMesh.m_skinnedVertices->size() * sizeof(glm::vec3));
+        }
+
+        if (true) {
+            int blockSize = 0;      // The launch configurator returned block size
+            int minGridSize = 0;    // The minimum grid size needed to achieve the maximum occupancy for a full device launch
+            int gridSize = 0;       // The actual grid size needed, based on input size
+            int size = triangleMesh.m_skinnedVertices->size();
+            cudaOccupancyMaxPotentialBlockSize(&minGridSize, &blockSize, ApplyTransformKernel, 0, size);
+            gridSize = (size + blockSize - 1) / blockSize;
+            ApplySkinnedTransformKernel << < gridSize, blockSize >> > (size, triangleMesh.m_globalTransform,
+                    static_cast<SkinnedVertex *>(m_verticesBuffer[meshID].m_dPtr),
+                    static_cast<glm::mat4 *>(m_boneMatricesBuffer[meshID].m_dPtr),
+                    static_cast<glm::vec3 *>(m_transformedPositionsBuffer[meshID].m_dPtr),
+                    static_cast<glm::vec3 *>(m_transformedNormalsBuffer[meshID].m_dPtr),
+                    static_cast<glm::vec3 *>(m_transformedTangentBuffer[meshID].m_dPtr),
+                    static_cast<glm::vec2 *>(m_texCoordBuffer[meshID].m_dPtr));
+            CUDA_SYNC_CHECK();
+        }
+
+        triangleMesh.m_verticesUpdateFlag = false;
+        triangleMesh.m_transformUpdateFlag = false;
+        m_trianglesBuffer[meshID].Upload(*triangleMesh.m_triangles);
+        triangleInput[meshID] = {};
+        triangleInput[meshID].type
+                = OPTIX_BUILD_INPUT_TYPE_TRIANGLES;
+
+        // create local variables, because we need a *pointer* to the
+        // device pointers
+        deviceVertexPositions[meshID] = m_transformedPositionsBuffer[meshID].DevicePointer();
+        deviceVertexTriangles[meshID] = m_trianglesBuffer[meshID].DevicePointer();
+
+        triangleInput[meshID].triangleArray.vertexFormat = OPTIX_VERTEX_FORMAT_FLOAT3;
+        triangleInput[meshID].triangleArray.vertexStrideInBytes = sizeof(glm::vec3);
+        triangleInput[meshID].triangleArray.numVertices = static_cast<int>(triangleMesh.m_skinnedVertices->size());
+        triangleInput[meshID].triangleArray.vertexBuffers = &deviceVertexPositions[meshID];
+
+        //triangleInput[meshID].triangleArray.transformFormat = OPTIX_TRANSFORM_FORMAT_MATRIX_FLOAT12;
+        //triangleInput[meshID].triangleArray.preTransform = deviceTransforms[meshID];
+
+        triangleInput[meshID].triangleArray.indexFormat = OPTIX_INDICES_FORMAT_UNSIGNED_INT3;
+        triangleInput[meshID].triangleArray.indexStrideInBytes = sizeof(glm::uvec3);
+        triangleInput[meshID].triangleArray.numIndexTriplets = static_cast<int>(triangleMesh.m_triangles->size());
+        triangleInput[meshID].triangleArray.indexBuffer = deviceVertexTriangles[meshID];
+
+        triangleInputFlags[meshID] = 0;
+
+        // in this example we have one SBT entry, and no per-primitive
+        // materials:
+        triangleInput[meshID].triangleArray.flags = &triangleInputFlags[meshID];
+        triangleInput[meshID].triangleArray.numSbtRecords = 1;
+        triangleInput[meshID].triangleArray.sbtIndexOffsetBuffer = 0;
+        triangleInput[meshID].triangleArray.sbtIndexOffsetSizeInBytes = 0;
+        triangleInput[meshID].triangleArray.sbtIndexOffsetStrideInBytes = 0;
+    }
     // ==================================================================
     // BLAS setup
     // ==================================================================
@@ -555,7 +875,7 @@ void RayTracer::BuildAccelerationStructure() {
                         (m_optixDeviceContext,
                          &accelerateOptions,
                          triangleInput.data(),
-                         static_cast<int>(m_instances.size()),  // num_build_inputs
+                         static_cast<int>(instanceSize),  // num_build_inputs
                          &blasBufferSizes
                         ));
 
@@ -584,7 +904,7 @@ void RayTracer::BuildAccelerationStructure() {
             /* stream */nullptr,
                                 &accelerateOptions,
                                 triangleInput.data(),
-                                static_cast<int>(m_instances.size()),
+                                static_cast<int>(instanceSize),
                                 tempBuffer.DevicePointer(),
                                 tempBuffer.m_sizeInBytes,
 
@@ -622,11 +942,6 @@ void RayTracer::BuildAccelerationStructure() {
     m_defaultRenderingLaunchParams.m_traversable = asHandle;
     m_defaultIlluminationEstimationLaunchParams.m_traversable = asHandle;
     m_hasAccelerationStructure = true;
-}
-
-void RayTracer::SetAccumulate(const bool &value) {
-    m_defaultRenderingPipeline.m_accumulate = value;
-    m_defaultRenderingPipeline.m_statusChanged = true;
 }
 
 void RayTracer::AssemblePipelines() {
@@ -688,11 +1003,11 @@ void RayTracer::CreateModule(RayTracerPipeline &targetPipeline, char ptxCode[],
 
 void RayTracer::AssemblePipeline(RayTracerPipeline &targetPipeline) const {
     std::vector<OptixProgramGroup> programGroups;
-    for (auto *pg : targetPipeline.m_rayGenProgramGroups)
+    for (auto *pg: targetPipeline.m_rayGenProgramGroups)
         programGroups.push_back(pg);
-    for (auto *pg : targetPipeline.m_missProgramGroups)
+    for (auto *pg: targetPipeline.m_missProgramGroups)
         programGroups.push_back(pg);
-    for (auto *pg : targetPipeline.m_hitGroupProgramGroups)
+    for (auto *pg: targetPipeline.m_hitGroupProgramGroups)
         programGroups.push_back(pg);
 
     char log[2048];
@@ -726,6 +1041,215 @@ void RayTracer::AssemblePipeline(RayTracerPipeline &targetPipeline) const {
 
 void RayTracer::BuildShaderBindingTable(std::vector<std::pair<unsigned, cudaTextureObject_t>> &boundTextures,
                                         std::vector<cudaGraphicsResource_t> &boundResources) {
+
+    // ------------------------------------------------------------------
+    // Prepare surface materials
+    // ------------------------------------------------------------------
+    const int numObjects = m_verticesBuffer.size();
+    for (auto &i: m_surfaceMaterials) if(i.m_type == MaterialType::Default) i.m_buffer.Free();
+    m_surfaceMaterials.clear();
+    m_surfaceMaterials.resize(numObjects);
+    int i = 0;
+    for (; i < m_instances.size(); i++) {
+        auto &instance = m_instances[i];
+        switch (instance.m_materialType) {
+            case MaterialType::MLVQ: {
+                m_surfaceMaterials[i].m_type = MaterialType::MLVQ;
+                if (instance.m_MLVQMaterialIndex >= 0 && instance.m_MLVQMaterialIndex < m_MLVQMaterialStorage.size()) {
+                    m_surfaceMaterials[i].m_buffer = m_MLVQMaterialStorage[instance.m_MLVQMaterialIndex].m_buffer;
+                }else{
+                    m_surfaceMaterials[i].m_buffer = m_MLVQMaterialStorage[0].m_buffer;
+                }
+                break;
+            }
+            case MaterialType::Default: {
+                m_surfaceMaterials[i].m_type = MaterialType::Default;
+                DefaultMaterial material;
+#pragma region Material Settings
+                material.m_surfaceColor = instance.m_surfaceColor;
+                material.m_roughness = instance.m_roughness;
+                material.m_metallic = instance.m_metallic;
+                material.m_albedoTexture = 0;
+                material.m_normalTexture = 0;
+                material.m_diffuseIntensity = instance.m_diffuseIntensity;
+                if (instance.m_albedoTexture != 0) {
+                    bool duplicate = false;
+                    for (auto &boundTexture: boundTextures) {
+                        if (boundTexture.first == instance.m_albedoTexture) {
+                            material.m_albedoTexture = boundTexture.second;
+                            duplicate = true;
+                            break;
+                        }
+                    }
+                    if (!duplicate) {
+#pragma region Bind output texture
+                        cudaArray_t textureArray;
+                        cudaGraphicsResource_t graphicsResource;
+                        CUDA_CHECK(GraphicsGLRegisterImage(&graphicsResource, instance.m_albedoTexture,
+                                                           GL_TEXTURE_2D, cudaGraphicsRegisterFlagsReadOnly));
+                        CUDA_CHECK(GraphicsMapResources(1, &graphicsResource, nullptr));
+                        CUDA_CHECK(GraphicsSubResourceGetMappedArray(&textureArray, graphicsResource, 0, 0));
+                        struct cudaResourceDesc cudaResourceDesc;
+                        memset(&cudaResourceDesc, 0, sizeof(cudaResourceDesc));
+                        cudaResourceDesc.resType = cudaResourceTypeArray;
+                        cudaResourceDesc.res.array.array = textureArray;
+                        struct cudaTextureDesc cudaTextureDesc;
+                        memset(&cudaTextureDesc, 0, sizeof(cudaTextureDesc));
+                        cudaTextureDesc.addressMode[0] = cudaAddressModeWrap;
+                        cudaTextureDesc.addressMode[1] = cudaAddressModeWrap;
+                        cudaTextureDesc.filterMode = cudaFilterModeLinear;
+                        cudaTextureDesc.readMode = cudaReadModeElementType;
+                        cudaTextureDesc.normalizedCoords = 1;
+                        CUDA_CHECK(CreateTextureObject(&material.m_albedoTexture, &cudaResourceDesc,
+                                                       &cudaTextureDesc, nullptr));
+#pragma endregion
+                        boundResources.push_back(graphicsResource);
+                        boundTextures.emplace_back(instance.m_albedoTexture,
+                                                   material.m_albedoTexture);
+                    }
+                }
+                if (instance.m_normalTexture != 0) {
+                    bool duplicate = false;
+                    for (auto &boundTexture: boundTextures) {
+                        if (boundTexture.first == instance.m_normalTexture) {
+                            material.m_normalTexture = boundTexture.second;
+                            duplicate = true;
+                            break;
+                        }
+                    }
+                    if (!duplicate) {
+#pragma region Bind output texture
+                        cudaArray_t textureArray;
+                        cudaGraphicsResource_t graphicsResource;
+                        CUDA_CHECK(GraphicsGLRegisterImage(&graphicsResource, instance.m_normalTexture,
+                                                           GL_TEXTURE_2D, cudaGraphicsRegisterFlagsReadOnly));
+                        CUDA_CHECK(GraphicsMapResources(1, &graphicsResource, nullptr));
+                        CUDA_CHECK(GraphicsSubResourceGetMappedArray(&textureArray, graphicsResource, 0, 0));
+                        struct cudaResourceDesc cudaResourceDesc;
+                        memset(&cudaResourceDesc, 0, sizeof(cudaResourceDesc));
+                        cudaResourceDesc.resType = cudaResourceTypeArray;
+                        cudaResourceDesc.res.array.array = textureArray;
+                        struct cudaTextureDesc cudaTextureDesc;
+                        memset(&cudaTextureDesc, 0, sizeof(cudaTextureDesc));
+                        cudaTextureDesc.addressMode[0] = cudaAddressModeWrap;
+                        cudaTextureDesc.addressMode[1] = cudaAddressModeWrap;
+                        cudaTextureDesc.filterMode = cudaFilterModeLinear;
+                        cudaTextureDesc.readMode = cudaReadModeElementType;
+                        cudaTextureDesc.normalizedCoords = 1;
+                        CUDA_CHECK(CreateTextureObject(&material.m_normalTexture, &cudaResourceDesc,
+                                                       &cudaTextureDesc, nullptr));
+#pragma endregion
+                        boundResources.push_back(graphicsResource);
+                        boundTextures.emplace_back(instance.m_normalTexture,
+                                                   material.m_normalTexture);
+                    }
+                }
+#pragma endregion
+                m_surfaceMaterials[i].m_buffer.Upload(&material, 1);
+            }
+                break;
+        }
+    }
+    for (; i < numObjects; i++) {
+        auto &instance = m_skinnedInstances[i - m_instances.size()];
+        switch (instance.m_materialType) {
+            case MaterialType::MLVQ: {
+                m_surfaceMaterials[i].m_type = MaterialType::MLVQ;
+                if (instance.m_MLVQMaterialIndex >= 0 && instance.m_MLVQMaterialIndex < m_MLVQMaterialStorage.size()) {
+                    m_surfaceMaterials[i].m_buffer = m_MLVQMaterialStorage[instance.m_MLVQMaterialIndex].m_buffer;
+                }else{
+                    m_surfaceMaterials[i].m_buffer = m_MLVQMaterialStorage[0].m_buffer;
+                }
+                break;
+            }
+            case MaterialType::Default: {
+                m_surfaceMaterials[i].m_type = MaterialType::Default;
+                DefaultMaterial material;
+#pragma region Material Settings
+                material.m_surfaceColor = instance.m_surfaceColor;
+                material.m_roughness = instance.m_roughness;
+                material.m_metallic = instance.m_metallic;
+                material.m_albedoTexture = 0;
+                material.m_normalTexture = 0;
+                material.m_diffuseIntensity = instance.m_diffuseIntensity;
+                if (instance.m_albedoTexture != 0) {
+                    bool duplicate = false;
+                    for (auto &boundTexture: boundTextures) {
+                        if (boundTexture.first == instance.m_albedoTexture) {
+                            material.m_albedoTexture = boundTexture.second;
+                            duplicate = true;
+                            break;
+                        }
+                    }
+                    if (!duplicate) {
+#pragma region Bind output texture
+                        cudaArray_t textureArray;
+                        cudaGraphicsResource_t graphicsResource;
+                        CUDA_CHECK(GraphicsGLRegisterImage(&graphicsResource, instance.m_albedoTexture,
+                                                           GL_TEXTURE_2D, cudaGraphicsRegisterFlagsReadOnly));
+                        CUDA_CHECK(GraphicsMapResources(1, &graphicsResource, nullptr));
+                        CUDA_CHECK(GraphicsSubResourceGetMappedArray(&textureArray, graphicsResource, 0, 0));
+                        struct cudaResourceDesc cudaResourceDesc;
+                        memset(&cudaResourceDesc, 0, sizeof(cudaResourceDesc));
+                        cudaResourceDesc.resType = cudaResourceTypeArray;
+                        cudaResourceDesc.res.array.array = textureArray;
+                        struct cudaTextureDesc cudaTextureDesc;
+                        memset(&cudaTextureDesc, 0, sizeof(cudaTextureDesc));
+                        cudaTextureDesc.addressMode[0] = cudaAddressModeWrap;
+                        cudaTextureDesc.addressMode[1] = cudaAddressModeWrap;
+                        cudaTextureDesc.filterMode = cudaFilterModeLinear;
+                        cudaTextureDesc.readMode = cudaReadModeElementType;
+                        cudaTextureDesc.normalizedCoords = 1;
+                        CUDA_CHECK(CreateTextureObject(&material.m_albedoTexture, &cudaResourceDesc,
+                                                       &cudaTextureDesc, nullptr));
+#pragma endregion
+                        boundResources.push_back(graphicsResource);
+                        boundTextures.emplace_back(instance.m_albedoTexture,
+                                                   material.m_albedoTexture);
+                    }
+                }
+                if (instance.m_normalTexture != 0) {
+                    bool duplicate = false;
+                    for (auto &boundTexture: boundTextures) {
+                        if (boundTexture.first == instance.m_normalTexture) {
+                            material.m_normalTexture = boundTexture.second;
+                            duplicate = true;
+                            break;
+                        }
+                    }
+                    if (!duplicate) {
+#pragma region Bind output texture
+                        cudaArray_t textureArray;
+                        cudaGraphicsResource_t graphicsResource;
+                        CUDA_CHECK(GraphicsGLRegisterImage(&graphicsResource, instance.m_normalTexture,
+                                                           GL_TEXTURE_2D, cudaGraphicsRegisterFlagsReadOnly));
+                        CUDA_CHECK(GraphicsMapResources(1, &graphicsResource, nullptr));
+                        CUDA_CHECK(GraphicsSubResourceGetMappedArray(&textureArray, graphicsResource, 0, 0));
+                        struct cudaResourceDesc cudaResourceDesc;
+                        memset(&cudaResourceDesc, 0, sizeof(cudaResourceDesc));
+                        cudaResourceDesc.resType = cudaResourceTypeArray;
+                        cudaResourceDesc.res.array.array = textureArray;
+                        struct cudaTextureDesc cudaTextureDesc;
+                        memset(&cudaTextureDesc, 0, sizeof(cudaTextureDesc));
+                        cudaTextureDesc.addressMode[0] = cudaAddressModeWrap;
+                        cudaTextureDesc.addressMode[1] = cudaAddressModeWrap;
+                        cudaTextureDesc.filterMode = cudaFilterModeLinear;
+                        cudaTextureDesc.readMode = cudaReadModeElementType;
+                        cudaTextureDesc.normalizedCoords = 1;
+                        CUDA_CHECK(CreateTextureObject(&material.m_normalTexture, &cudaResourceDesc,
+                                                       &cudaTextureDesc, nullptr));
+#pragma endregion
+                        boundResources.push_back(graphicsResource);
+                        boundTextures.emplace_back(instance.m_normalTexture,
+                                                   material.m_normalTexture);
+                    }
+                }
+#pragma endregion
+                m_surfaceMaterials[i].m_buffer.Upload(&material, 1);
+            }
+                break;
+        }
+    }
     {
         // ------------------------------------------------------------------
         // build raygen records
@@ -762,93 +1286,42 @@ void RayTracer::BuildShaderBindingTable(std::vector<std::pair<unsigned, cudaText
         // we don't actually have any objects in this example, but let's
         // create a dummy one so the SBT doesn't have any null pointers
         // (which the sanity checks in compilation would complain about)
-        const int numObjects = m_verticesBuffer.size();
+
         std::vector<DefaultRenderingRayHitRecord> hitGroupRecords;
-        for (int i = 0; i < numObjects; i++) {
+        int i = 0;
+        for (; i < m_instances.size(); i++) {
+            auto &instance = m_instances[i];
             for (int rayID = 0; rayID < static_cast<int>(DefaultRenderingRayType::RayTypeCount); rayID++) {
                 DefaultRenderingRayHitRecord rec;
                 OPTIX_CHECK(optixSbtRecordPackHeader(m_defaultRenderingPipeline.m_hitGroupProgramGroups[rayID], &rec));
-                rec.m_data.m_mesh.m_vertices = reinterpret_cast<Vertex *>(m_verticesBuffer[i].DevicePointer());
+                rec.m_data.m_mesh.m_positions = reinterpret_cast<glm::vec3 *>(m_transformedPositionsBuffer[i].DevicePointer());
+                rec.m_data.m_mesh.m_normals = reinterpret_cast<glm::vec3 *>(m_transformedNormalsBuffer[i].DevicePointer());
+                rec.m_data.m_mesh.m_tangents = reinterpret_cast<glm::vec3 *>(m_transformedTangentBuffer[i].DevicePointer());
+                rec.m_data.m_mesh.m_texCoords = reinterpret_cast<glm::vec2 *>(m_texCoordBuffer[i].DevicePointer());
+
                 rec.m_data.m_mesh.m_triangles = reinterpret_cast<glm::uvec3 *>(m_trianglesBuffer[i].DevicePointer());
-                rec.m_data.m_mesh.m_transform = m_instances[i].m_globalTransform;
-                rec.m_data.m_material.m_surfaceColor = m_instances[i].m_surfaceColor;
-                rec.m_data.m_material.m_roughness = m_instances[i].m_roughness;
-                rec.m_data.m_material.m_metallic = m_instances[i].m_metallic;
-                rec.m_data.m_material.m_albedoTexture = 0;
-                rec.m_data.m_material.m_normalTexture = 0;
-                rec.m_data.m_material.m_diffuseIntensity = m_instances[i].m_diffuseIntensity;
-                if (m_instances[i].m_albedoTexture != 0) {
-                    bool duplicate = false;
-                    for (auto &boundTexture : boundTextures) {
-                        if (boundTexture.first == m_instances[i].m_albedoTexture) {
-                            rec.m_data.m_material.m_albedoTexture = boundTexture.second;
-                            duplicate = true;
-                            break;
-                        }
-                    }
-                    if (!duplicate) {
-#pragma region Bind output texture
-                        cudaArray_t textureArray;
-                        cudaGraphicsResource_t graphicsResource;
-                        CUDA_CHECK(GraphicsGLRegisterImage(&graphicsResource, m_instances[i].m_albedoTexture,
-                                                           GL_TEXTURE_2D, cudaGraphicsRegisterFlagsReadOnly));
-                        CUDA_CHECK(GraphicsMapResources(1, &graphicsResource, nullptr));
-                        CUDA_CHECK(GraphicsSubResourceGetMappedArray(&textureArray, graphicsResource, 0, 0));
-                        struct cudaResourceDesc cudaResourceDesc;
-                        memset(&cudaResourceDesc, 0, sizeof(cudaResourceDesc));
-                        cudaResourceDesc.resType = cudaResourceTypeArray;
-                        cudaResourceDesc.res.array.array = textureArray;
-                        struct cudaTextureDesc cudaTextureDesc;
-                        memset(&cudaTextureDesc, 0, sizeof(cudaTextureDesc));
-                        cudaTextureDesc.addressMode[0] = cudaAddressModeWrap;
-                        cudaTextureDesc.addressMode[1] = cudaAddressModeWrap;
-                        cudaTextureDesc.filterMode = cudaFilterModeLinear;
-                        cudaTextureDesc.readMode = cudaReadModeElementType;
-                        cudaTextureDesc.normalizedCoords = 1;
-                        CUDA_CHECK(CreateTextureObject(&rec.m_data.m_material.m_albedoTexture, &cudaResourceDesc,
-                                                       &cudaTextureDesc, nullptr));
-#pragma endregion
-                        boundResources.push_back(graphicsResource);
-                        boundTextures.emplace_back(m_instances[i].m_albedoTexture,
-                                                   rec.m_data.m_material.m_albedoTexture);
-                    }
-                }
-                if (m_instances[i].m_normalTexture != 0) {
-                    bool duplicate = false;
-                    for (auto &boundTexture : boundTextures) {
-                        if (boundTexture.first == m_instances[i].m_normalTexture) {
-                            rec.m_data.m_material.m_normalTexture = boundTexture.second;
-                            duplicate = true;
-                            break;
-                        }
-                    }
-                    if (!duplicate) {
-#pragma region Bind output texture
-                        cudaArray_t textureArray;
-                        cudaGraphicsResource_t graphicsResource;
-                        CUDA_CHECK(GraphicsGLRegisterImage(&graphicsResource, m_instances[i].m_normalTexture,
-                                                           GL_TEXTURE_2D, cudaGraphicsRegisterFlagsReadOnly));
-                        CUDA_CHECK(GraphicsMapResources(1, &graphicsResource, nullptr));
-                        CUDA_CHECK(GraphicsSubResourceGetMappedArray(&textureArray, graphicsResource, 0, 0));
-                        struct cudaResourceDesc cudaResourceDesc;
-                        memset(&cudaResourceDesc, 0, sizeof(cudaResourceDesc));
-                        cudaResourceDesc.resType = cudaResourceTypeArray;
-                        cudaResourceDesc.res.array.array = textureArray;
-                        struct cudaTextureDesc cudaTextureDesc;
-                        memset(&cudaTextureDesc, 0, sizeof(cudaTextureDesc));
-                        cudaTextureDesc.addressMode[0] = cudaAddressModeWrap;
-                        cudaTextureDesc.addressMode[1] = cudaAddressModeWrap;
-                        cudaTextureDesc.filterMode = cudaFilterModeLinear;
-                        cudaTextureDesc.readMode = cudaReadModeElementType;
-                        cudaTextureDesc.normalizedCoords = 1;
-                        CUDA_CHECK(CreateTextureObject(&rec.m_data.m_material.m_normalTexture, &cudaResourceDesc,
-                                                       &cudaTextureDesc, nullptr));
-#pragma endregion
-                        boundResources.push_back(graphicsResource);
-                        boundTextures.emplace_back(m_instances[i].m_normalTexture,
-                                                   rec.m_data.m_material.m_normalTexture);
-                    }
-                }
+                rec.m_data.m_mesh.m_transform = instance.m_globalTransform;
+
+                rec.m_data.m_materialType = instance.m_materialType;
+                rec.m_data.m_material = reinterpret_cast<void *>(m_surfaceMaterials[i].m_buffer.DevicePointer());
+                hitGroupRecords.push_back(rec);
+            }
+        }
+        for (; i < numObjects; i++) {
+            auto &instance = m_skinnedInstances[i - m_instances.size()];
+            for (int rayID = 0; rayID < static_cast<int>(DefaultRenderingRayType::RayTypeCount); rayID++) {
+                DefaultRenderingRayHitRecord rec;
+                OPTIX_CHECK(optixSbtRecordPackHeader(m_defaultRenderingPipeline.m_hitGroupProgramGroups[rayID], &rec));
+                rec.m_data.m_mesh.m_positions = reinterpret_cast<glm::vec3 *>(m_transformedPositionsBuffer[i].DevicePointer());
+                rec.m_data.m_mesh.m_normals = reinterpret_cast<glm::vec3 *>(m_transformedNormalsBuffer[i].DevicePointer());
+                rec.m_data.m_mesh.m_tangents = reinterpret_cast<glm::vec3 *>(m_transformedTangentBuffer[i].DevicePointer());
+                rec.m_data.m_mesh.m_texCoords = reinterpret_cast<glm::vec2 *>(m_texCoordBuffer[i].DevicePointer());
+
+                rec.m_data.m_mesh.m_triangles = reinterpret_cast<glm::uvec3 *>(m_trianglesBuffer[i].DevicePointer());
+                rec.m_data.m_mesh.m_transform = instance.m_globalTransform;
+
+                rec.m_data.m_materialType = instance.m_materialType;
+                rec.m_data.m_material = reinterpret_cast<void *>(m_surfaceMaterials[i].m_buffer.DevicePointer());
                 hitGroupRecords.push_back(rec);
             }
         }
@@ -894,23 +1367,45 @@ void RayTracer::BuildShaderBindingTable(std::vector<std::pair<unsigned, cudaText
         // we don't actually have any objects in this example, but let's
         // create a dummy one so the SBT doesn't have any null pointers
         // (which the sanity checks in compilation would complain about)
-        const int numObjects = m_verticesBuffer.size();
         std::vector<DefaultIlluminationEstimationRayHitRecord> hitGroupRecords;
-        for (int i = 0; i < numObjects; i++) {
+        int i = 0;
+        for (; i < m_instances.size(); i++) {
+            auto &instance = m_instances[i];
             for (int rayID = 0; rayID < static_cast<int>(DefaultIlluminationEstimationRayType::RayTypeCount); rayID++) {
                 DefaultIlluminationEstimationRayHitRecord rec;
                 OPTIX_CHECK(
                         optixSbtRecordPackHeader(m_defaultIlluminationEstimationPipeline.m_hitGroupProgramGroups[rayID],
                                                  &rec));
-                rec.m_data.m_mesh.m_vertices = reinterpret_cast<Vertex *>(m_verticesBuffer[i].DevicePointer());
+                rec.m_data.m_mesh.m_positions = reinterpret_cast<glm::vec3 *>(m_transformedPositionsBuffer[i].DevicePointer());
+                rec.m_data.m_mesh.m_normals = reinterpret_cast<glm::vec3 *>(m_transformedNormalsBuffer[i].DevicePointer());
+                rec.m_data.m_mesh.m_tangents = reinterpret_cast<glm::vec3 *>(m_transformedTangentBuffer[i].DevicePointer());
+                rec.m_data.m_mesh.m_texCoords = reinterpret_cast<glm::vec2 *>(m_texCoordBuffer[i].DevicePointer());
+
                 rec.m_data.m_mesh.m_triangles = reinterpret_cast<glm::uvec3 *>(m_trianglesBuffer[i].DevicePointer());
-                rec.m_data.m_mesh.m_transform = m_instances[i].m_globalTransform;
-                rec.m_data.m_material.m_surfaceColor = m_instances[i].m_surfaceColor;
-                rec.m_data.m_material.m_roughness = m_instances[i].m_roughness;
-                rec.m_data.m_material.m_metallic = m_instances[i].m_metallic;
-                rec.m_data.m_material.m_albedoTexture = 0;
-                rec.m_data.m_material.m_normalTexture = 0;
-                rec.m_data.m_material.m_diffuseIntensity = m_instances[i].m_diffuseIntensity;
+                rec.m_data.m_mesh.m_transform = instance.m_globalTransform;
+
+                rec.m_data.m_materialType = instance.m_materialType;
+                rec.m_data.m_material = reinterpret_cast<void *>(m_surfaceMaterials[i].m_buffer.DevicePointer());
+                hitGroupRecords.push_back(rec);
+            }
+        }
+        for (; i < numObjects; i++) {
+            auto &instance = m_skinnedInstances[i - m_instances.size()];
+            for (int rayID = 0; rayID < static_cast<int>(DefaultIlluminationEstimationRayType::RayTypeCount); rayID++) {
+                DefaultIlluminationEstimationRayHitRecord rec;
+                OPTIX_CHECK(
+                        optixSbtRecordPackHeader(m_defaultIlluminationEstimationPipeline.m_hitGroupProgramGroups[rayID],
+                                                 &rec));
+                rec.m_data.m_mesh.m_positions = reinterpret_cast<glm::vec3 *>(m_transformedPositionsBuffer[i].DevicePointer());
+                rec.m_data.m_mesh.m_normals = reinterpret_cast<glm::vec3 *>(m_transformedNormalsBuffer[i].DevicePointer());
+                rec.m_data.m_mesh.m_tangents = reinterpret_cast<glm::vec3 *>(m_transformedTangentBuffer[i].DevicePointer());
+                rec.m_data.m_mesh.m_texCoords = reinterpret_cast<glm::vec2 *>(m_texCoordBuffer[i].DevicePointer());
+
+                rec.m_data.m_mesh.m_triangles = reinterpret_cast<glm::uvec3 *>(m_trianglesBuffer[i].DevicePointer());
+                rec.m_data.m_mesh.m_transform = instance.m_globalTransform;
+
+                rec.m_data.m_materialType = instance.m_materialType;
+                rec.m_data.m_material = reinterpret_cast<void *>(m_surfaceMaterials[i].m_buffer.DevicePointer());
                 hitGroupRecords.push_back(rec);
             }
         }
@@ -918,5 +1413,57 @@ void RayTracer::BuildShaderBindingTable(std::vector<std::pair<unsigned, cudaText
         m_defaultIlluminationEstimationPipeline.m_sbt.hitgroupRecordBase = m_defaultIlluminationEstimationPipeline.m_hitGroupRecordsBuffer.DevicePointer();
         m_defaultIlluminationEstimationPipeline.m_sbt.hitgroupRecordStrideInBytes = sizeof(DefaultIlluminationEstimationRayHitRecord);
         m_defaultIlluminationEstimationPipeline.m_sbt.hitgroupRecordCount = static_cast<int>(hitGroupRecords.size());
+    }
+}
+
+void RayTracer::Resize(const glm::ivec2 &newSize) {
+    if (m_denoiser) {
+        OPTIX_CHECK(optixDenoiserDestroy(m_denoiser));
+    };
+    // ------------------------------------------------------------------
+    // create the denoiser:
+    OptixDenoiserOptions denoiserOptions = {};
+    OPTIX_CHECK(
+            optixDenoiserCreate(m_optixDeviceContext, OPTIX_DENOISER_MODEL_KIND_LDR, &denoiserOptions, &m_denoiser));
+    // .. then compute and allocate memory resources for the denoiser
+    OptixDenoiserSizes denoiserReturnSizes;
+    OPTIX_CHECK(optixDenoiserComputeMemoryResources(m_denoiser, newSize.x, newSize.y,
+                                                    &denoiserReturnSizes));
+
+    m_denoiserScratch.Resize(std::max(denoiserReturnSizes.withOverlapScratchSizeInBytes,
+                                      denoiserReturnSizes.withoutOverlapScratchSizeInBytes));
+
+    m_denoiserState.Resize(denoiserReturnSizes.stateSizeInBytes);
+    // ------------------------------------------------------------------
+    // resize our cuda frame buffer
+    m_denoisedBuffer.Resize(newSize.x * newSize.y * sizeof(glm::vec4));
+    m_frameBufferColor.Resize(newSize.x * newSize.y * sizeof(glm::vec4));
+    m_frameBufferNormal.Resize(newSize.x * newSize.y * sizeof(glm::vec4));
+    m_frameBufferAlbedo.Resize(newSize.x * newSize.y * sizeof(glm::vec4));
+
+    // update the launch parameters that we'll pass to the optix
+    // launch:
+    m_defaultRenderingLaunchParams.m_frame.size = newSize;
+    m_defaultRenderingLaunchParams.m_frame.m_colorBuffer = (glm::vec4 *) m_frameBufferColor.DevicePointer();
+    m_defaultRenderingLaunchParams.m_frame.m_normalBuffer = (glm::vec4 *) m_frameBufferNormal.DevicePointer();
+    m_defaultRenderingLaunchParams.m_frame.m_albedoBuffer = (glm::vec4 *) m_frameBufferAlbedo.DevicePointer();
+
+    // ------------------------------------------------------------------
+    OPTIX_CHECK(optixDenoiserSetup(m_denoiser, 0,
+                                   newSize.x, newSize.y,
+                                   m_denoiserState.DevicePointer(),
+                                   m_denoiserState.m_sizeInBytes,
+                                   m_denoiserScratch.DevicePointer(),
+                                   m_denoiserScratch.m_sizeInBytes));
+}
+
+void RayTracer::LoadBtfMaterials(const std::vector<std::string>& folderPathes) {
+    for (const auto &entry : folderPathes)
+    {
+        MLVQMaterialStorage storage;
+        storage.m_material = std::make_shared<MLVQMaterial>();
+        storage.m_material->m_btf.Init(entry);
+        storage.m_buffer.Upload(storage.m_material.get(), 1);
+        m_MLVQMaterialStorage.push_back(storage);
     }
 }

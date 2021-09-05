@@ -4,7 +4,6 @@
 #include <PhysicsManager.hpp>
 #include <ProjectManager.hpp>
 #include <RadialBoundingVolume.hpp>
-#include <RayTracedRenderer.hpp>
 #include <RigidBody.hpp>
 #include <SkinnedMeshRenderer.hpp>
 #include <TreeLeaves.hpp>
@@ -93,9 +92,6 @@ Entity TreeSystem::GetLeaves(const Entity &tree) {
         auto meshRenderer = leaves.GetOrSetPrivateComponent<MeshRenderer>().lock();
         auto skinnedMeshRenderer =
                 leaves.GetOrSetPrivateComponent<SkinnedMeshRenderer>().lock();
-        auto rayTracerRenderer =
-                leaves.GetOrSetPrivateComponent<RayTracerFacility::RayTracedRenderer>()
-                        .lock();
         auto leafMat = AssetManager::LoadMaterial(
                 DefaultResources::GLPrograms::StandardProgram);
         meshRenderer->m_material = leafMat;
@@ -105,7 +101,6 @@ Entity TreeSystem::GetLeaves(const Entity &tree) {
         leafMat->m_metallic = 0.0f;
         leafMat->m_albedoColor = glm::vec3(0.0f, 1.0f, 0.0f);
         meshRenderer->m_mesh = AssetManager::CreateAsset<Mesh>();
-        rayTracerRenderer->SyncWithMeshRenderer();
         meshRenderer->SetEnabled(true);
 
         skinnedMeshRenderer->m_skinnedMesh =
@@ -763,13 +758,6 @@ Entity TreeSystem::CreateTree(const Transform &transform) {
     skinnedMeshRenderer->AttachAnimator(
             plant.GetOrSetPrivateComponent<Animator>().lock());
 
-    auto rtt =
-            plant.GetOrSetPrivateComponent<RayTracerFacility::RayTracedRenderer>()
-                    .lock();
-    rtt->m_albedoTexture = m_defaultRayTracingBranchAlbedoTexture;
-    rtt->m_normalTexture = m_defaultRayTracingBranchNormalTexture;
-    rtt->m_mesh = plant.GetOrSetPrivateComponent<MeshRenderer>().lock()->m_mesh;
-
     return plant;
 }
 
@@ -929,7 +917,7 @@ void TreeSystem::OnInspect() {
             if (newTreeParameters.empty()) {
                 newTreeParameters.resize(1);
                 newTreeParameters[0].Deserialize(
-                        std::filesystem::path(PLANT_ARCHITECT_RESOURCE_FOLDER) /
+                        std::filesystem::path("../Resources") /
                         "Parameters/default.treeparam");
             }
             const auto currentSize = newTreePositions.size();
@@ -1633,11 +1621,6 @@ void TreeSystem::GenerateMeshForTree() {
                 if (plant.HasPrivateComponent<MeshRenderer>()) {
                     plant.GetOrSetPrivateComponent<MeshRenderer>().lock()->m_mesh =
                             treeData->m_branchMesh;
-                }
-                if (plant.HasPrivateComponent<RayTracerFacility::RayTracedRenderer>()) {
-                    plant.GetOrSetPrivateComponent<RayTracerFacility::RayTracedRenderer>()
-                            .lock()
-                            ->m_mesh = treeData->m_branchMesh;
                 }
             }
 #pragma endregion
@@ -2891,19 +2874,19 @@ void TreeSystem::Start() {
     }
     if (!m_defaultRayTracingBranchAlbedoTexture.Get<Texture2D>())
         m_defaultRayTracingBranchAlbedoTexture = AssetManager::Import<Texture2D>(
-                std::filesystem::path(PLANT_ARCHITECT_RESOURCE_FOLDER) /
+                std::filesystem::path("../Resources") /
                 "Textures/BarkMaterial/Bark_Pine_baseColor.jpg");
     if (!m_defaultRayTracingBranchNormalTexture.Get<Texture2D>())
         m_defaultRayTracingBranchNormalTexture = AssetManager::Import<Texture2D>(
-                std::filesystem::path(PLANT_ARCHITECT_RESOURCE_FOLDER) /
+                std::filesystem::path("../Resources") /
                 "Textures/BarkMaterial/Bark_Pine_normal.jpg");
     if (!m_defaultBranchAlbedoTexture.Get<Texture2D>())
         m_defaultBranchAlbedoTexture = AssetManager::Import<Texture2D>(
-                std::filesystem::path(PLANT_ARCHITECT_RESOURCE_FOLDER) /
+                std::filesystem::path("../Resources") /
                 "Textures/BarkMaterial/Bark_Pine_baseColor.jpg");
     if (!m_defaultBranchNormalTexture.Get<Texture2D>())
         m_defaultBranchNormalTexture = AssetManager::Import<Texture2D>(
-                std::filesystem::path(PLANT_ARCHITECT_RESOURCE_FOLDER) /
+                std::filesystem::path("../Resources") /
                 "Textures/BarkMaterial/Bark_Pine_normal.jpg");
 #pragma endregion
 

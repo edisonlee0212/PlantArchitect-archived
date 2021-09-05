@@ -14,7 +14,7 @@ namespace PlantArchitect {
         AssetRef m_leavesMesh;
         AssetRef m_skinnedLeavesMesh;
 
-        void OnGui() override;
+        void OnInspect() override;
 
         void FormSkinnedMesh(std::vector<unsigned> &boneIndices);
 

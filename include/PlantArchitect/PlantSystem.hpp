@@ -193,7 +193,7 @@ namespace PlantArchitect {
 
         int m_step;
 
-        void OnGui() override;
+        void OnInspect() override;
 
         void CalculateKDop();
 

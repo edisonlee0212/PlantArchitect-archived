@@ -13,7 +13,6 @@
 #include <TreeSystem.hpp>
 #include <TreeLeaves.hpp>
 #include <CubeVolume.hpp>
-#include <RayTracedRenderer.hpp>
 #include <RadialBoundingVolume.hpp>
 #include <ClassRegistry.hpp>
 #include <ObjectRotator.hpp>
@@ -45,9 +44,6 @@ int main() {
 
     ClassRegistry::RegisterSystem<PlantSystem>("PlantSystem");
     ClassRegistry::RegisterSystem<TreeSystem>("TreeSystem");
-
-    ClassRegistry::RegisterPrivateComponent<RayTracedRenderer>(
-            "RayTracedRenderer");
 
     const bool enableRayTracing = true;
     EngineSetup(enableRayTracing);

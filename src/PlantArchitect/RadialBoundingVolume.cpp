@@ -1,6 +1,5 @@
 #include <PlantSystem.hpp>
 #include <RadialBoundingVolume.hpp>
-#include <RayTracedRenderer.hpp>
 #include <RayTracer.hpp>
 
 using namespace PlantArchitect;
@@ -241,12 +240,6 @@ void RadialBoundingVolume::FormEntity() {
                 DefaultResources::GLPrograms::StandardProgram);
         mmc->m_forwardRendering = false;
         mmc->m_mesh = m_boundMeshes[i];
-
-        auto rayTracedRenderer =
-                slice.GetOrSetPrivateComponent<RayTracerFacility::RayTracedRenderer>()
-                        .lock();
-        slice.SetParent(GetOwner(), false);
-        rayTracedRenderer->SyncWithMeshRenderer();
     }
 }
 
@@ -486,7 +479,7 @@ void RadialBoundingVolume::CalculateVolume(float maxHeight) {
     GenerateMesh();
 }
 
-void RadialBoundingVolume::OnGui() {
+void RadialBoundingVolume::OnInspect() {
     if (!m_meshGenerated)
         CalculateVolume();
     ImGui::Checkbox("Prune Buds", &m_pruneBuds);
