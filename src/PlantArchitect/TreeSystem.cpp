@@ -34,7 +34,7 @@ void TreeSystem::WriteChain(int order, Entity internode,
     chain->append_attribute(doc->allocate_attribute(
             "gravelius", doc->allocate_string(std::to_string(order + 1).c_str())));
     chains->append_node(chain);
-    std::vector<rapidxml::xml_node<> *> nodes;
+    std::vector<rapidxml::xml_node<> * > nodes;
     while (walker.GetChildrenAmount() != 0) {
         auto *node = doc->allocate_node(rapidxml::node_element, "Node");
         node->append_attribute(doc->allocate_attribute(
@@ -107,10 +107,8 @@ Entity TreeSystem::GetLeaves(const Entity &tree) {
                 AssetManager::CreateAsset<SkinnedMesh>();
         auto animation =
                 tree.GetOrSetPrivateComponent<Animator>().lock()->GetAnimation();
-        skinnedMeshRenderer->m_skinnedMesh.Get<SkinnedMesh>()->m_animation =
-                animation;
-        skinnedMeshRenderer->AttachAnimator(
-                tree.GetOrSetPrivateComponent<Animator>().lock());
+        skinnedMeshRenderer->m_animator =
+                tree.GetOrSetPrivateComponent<Animator>().lock();
         auto skinnedMeshMat = AssetManager::LoadMaterial(
                 DefaultResources::GLPrograms::StandardSkinnedProgram);
         skinnedMeshRenderer->m_material = skinnedMeshMat;
@@ -716,7 +714,6 @@ Entity TreeSystem::CreateTree(const Transform &transform) {
     plant.SetParent(m_plantSystem.Get<PlantSystem>()->m_anchor.Get());
 
     auto animator = plant.GetOrSetPrivateComponent<Animator>().lock();
-    animator->Setup(AssetManager::CreateAsset<Animation>());
 
     GetLeaves(plant);
     GetRbv(plant);
@@ -740,10 +737,6 @@ Entity TreeSystem::CreateTree(const Transform &transform) {
     auto skinnedMeshRenderer =
             plant.GetOrSetPrivateComponent<SkinnedMeshRenderer>().lock();
     skinnedMeshRenderer->m_skinnedMesh = AssetManager::CreateAsset<SkinnedMesh>();
-    auto animation =
-            plant.GetOrSetPrivateComponent<Animator>().lock()->GetAnimation();
-    skinnedMeshRenderer->m_skinnedMesh.Get<SkinnedMesh>()->m_animation =
-            animation;
 
     auto skinnedMat = AssetManager::LoadMaterial(
             DefaultResources::GLPrograms::StandardSkinnedProgram);
@@ -755,8 +748,8 @@ Entity TreeSystem::CreateTree(const Transform &transform) {
                            m_defaultBranchNormalTexture.Get<Texture2D>());
     skinnedMat->SetTexture(TextureType::Albedo,
                            m_defaultBranchAlbedoTexture.Get<Texture2D>());
-    skinnedMeshRenderer->AttachAnimator(
-            plant.GetOrSetPrivateComponent<Animator>().lock());
+    skinnedMeshRenderer->m_animator =
+            plant.GetOrSetPrivateComponent<Animator>().lock();
 
     return plant;
 }
