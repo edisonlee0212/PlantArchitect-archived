@@ -34,7 +34,7 @@ void TreeSystem::WriteChain(int order, Entity internode,
     chain->append_attribute(doc->allocate_attribute(
             "gravelius", doc->allocate_string(std::to_string(order + 1).c_str())));
     chains->append_node(chain);
-    std::vector<rapidxml::xml_node<> * > nodes;
+    std::vector<rapidxml::xml_node<> *> nodes;
     while (walker.GetChildrenAmount() != 0) {
         auto *node = doc->allocate_node(rapidxml::node_element, "Node");
         node->append_attribute(doc->allocate_attribute(
@@ -1699,7 +1699,9 @@ void TreeSystem::GenerateSkinnedMeshForTree() {
                                              .m_value);
                 boneIndicesLists[plantIndex][i] = i;
             }
-            animator->Setup(boundEntitiesLists[plantIndex], names, offsetMatrices);
+            animator->Setup(names, offsetMatrices);
+            skinnedMeshRenderer->SetRagDoll(true);
+            skinnedMeshRenderer->SetRagDollBoundEntities(boundEntitiesLists[plantIndex], false);
 #pragma endregion
             if (rootInternode.GetChildrenAmount() != 0) {
                 std::vector<unsigned> skinnedIndices;
@@ -1716,9 +1718,14 @@ void TreeSystem::GenerateSkinnedMeshForTree() {
             }
 #pragma endregion
             Entity leaves = GetLeaves(plant);
-            if (leaves.IsValid())
+            if (leaves.IsValid()) {
                 leaves.GetOrSetPrivateComponent<TreeLeaves>().lock()->FormSkinnedMesh(
                         boneIndicesLists[plantIndex]);
+                auto leavesSkinnedMeshRenderer =
+                        leaves.GetOrSetPrivateComponent<SkinnedMeshRenderer>().lock();
+                leavesSkinnedMeshRenderer->SetRagDoll(true);
+                leavesSkinnedMeshRenderer->SetRagDollBoundEntities(boundEntitiesLists[plantIndex], false);
+            }
         }
     }
 }
